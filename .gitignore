@@ -1,0 +1,11 @@
+# Project place files
+/*.rbxl
+/*.rbxlx
+
+# Roblox Studio lock files
+/*.rbxlx.lock
+/*.rbxl.lock
+
+# Generated Rojo sourcemap
+sourcemap.json
+context-clips
