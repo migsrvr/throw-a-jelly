@@ -1,7 +1,8 @@
 --!strict
 --[[
 	PlayerStateService.luau
-	Manages per-player profiles, Roblox leaderstats, and state replication.
+	Manages per-player profiles, Roblox leaderstats, and state replication
+	for Hotbar/Slot placement, Slime Index, Shop Eggs, Boosts, and Free Gift.
 ]]
 
 local Players = game:GetService("Players")
@@ -77,6 +78,12 @@ function PlayerStateService.Sync(player: Player)
 		end
 	end
 
+	-- Serialize PlacedSlimesBySlot with string keys so RemoteEvent table replication never drops sparse integer keys
+	local placedBySlotStr: { [string]: ProgressionLogic.SlimeInstance } = {}
+	for slot, inst in profile.PlacedSlimesBySlot do
+		placedBySlotStr[tostring(slot)] = inst
+	end
+
 	local syncEvent = Remotes.GetEvent("PlayerStateSync")
 	syncEvent:FireClient(player, {
 		Cash = profile.Cash,
@@ -90,6 +97,14 @@ function PlayerStateService.Sync(player: Player)
 		EquippedSlimeId = profile.EquippedSlimeId,
 		OwnedSlimes = profile.OwnedSlimes,
 		PlacedSlimes = profile.PlacedSlimes,
+		UnplacedSlimes = profile.UnplacedSlimes,
+		PlacedSlimesBySlot = placedBySlotStr,
+		DiscoveredSlimes = profile.DiscoveredSlimes,
+		EquippedTrailZone = profile.EquippedTrailZone,
+		ClaimedFreeGift = profile.ClaimedFreeGift,
+		OwnedBoosts = profile.OwnedBoosts,
+		TotalThrows = profile.TotalThrows,
+		TotalPullUps = profile.TotalPullUps,
 		PendingIncome = math.floor(profile.PendingIncome),
 		IncomePerSec = incomePerSec,
 	})
@@ -126,7 +141,6 @@ function PlayerStateService.Init()
 		onPlayerAdded(player)
 	end
 
-	-- Client requests
 	Remotes.GetEvent("RequestUpgrade").OnServerEvent:Connect(function(player: Player, payload: any)
 		local profile = profiles[player]
 		if not profile or type(payload) ~= "table" then
@@ -167,6 +181,89 @@ function PlayerStateService.Init()
 		ProgressionLogic.PlaceBestSlimes(profile)
 		PlayerStateService.Toast(player, "Placed your highest-earning slimes on your plot!", "success")
 		PlayerStateService.Sync(player)
+	end)
+
+	Remotes.GetEvent("RequestPlaceOnSlot").OnServerEvent:Connect(function(player: Player, payload: any)
+		local profile = profiles[player]
+		if not profile or type(payload) ~= "table" then
+			return
+		end
+		local uid = payload.SlimeUid
+		local slotIdx = tonumber(payload.SlotIndex)
+		if type(uid) == "string" and slotIdx then
+			local ok, msg = ProgressionLogic.PlaceSlimeAtSlot(profile, uid, slotIdx)
+			PlayerStateService.Toast(player, msg, if ok then "success" else "warn")
+			if ok then
+				PlayerStateService.Sync(player)
+			end
+		end
+	end)
+
+	Remotes.GetEvent("RequestPickupFromSlot").OnServerEvent:Connect(function(player: Player, payload: any)
+		local profile = profiles[player]
+		if not profile or type(payload) ~= "table" then
+			return
+		end
+		local slotIdx = tonumber(payload.SlotIndex)
+		if slotIdx then
+			local ok, msg = ProgressionLogic.PickupSlimeFromSlot(profile, slotIdx)
+			PlayerStateService.Toast(player, msg, if ok then "info" else "warn")
+			if ok then
+				PlayerStateService.Sync(player)
+			end
+		end
+	end)
+
+	Remotes.GetEvent("RequestClaimFreeGift").OnServerEvent:Connect(function(player: Player)
+		local profile = profiles[player]
+		if not profile then
+			return
+		end
+		local ok, msg = ProgressionLogic.ClaimFreeGiftSlime(profile)
+		PlayerStateService.Toast(player, msg, if ok then "success" else "warn")
+		if ok then
+			PlayerStateService.Sync(player)
+		end
+	end)
+
+	Remotes.GetEvent("RequestBuyBoost").OnServerEvent:Connect(function(player: Player, payload: any)
+		local profile = profiles[player]
+		if not profile or type(payload) ~= "table" or type(payload.BoostId) ~= "string" then
+			return
+		end
+		local ok, msg = ProgressionLogic.PurchaseShopBoost(profile, payload.BoostId)
+		PlayerStateService.Toast(player, msg, if ok then "success" else "warn")
+		if ok then
+			PlayerStateService.Sync(player)
+		end
+	end)
+
+	Remotes.GetEvent("RequestHatchEgg").OnServerEvent:Connect(function(player: Player, payload: any)
+		local profile = profiles[player]
+		if not profile or type(payload) ~= "table" or type(payload.EggId) ~= "string" then
+			return
+		end
+		local count = if payload.Count == 3 then 3 else 1
+		local ok, msg = ProgressionLogic.HatchShopEgg(profile, payload.EggId, count, nil)
+		PlayerStateService.Toast(player, msg, if ok then "success" else "warn")
+		if ok then
+			PlayerStateService.Sync(player)
+		end
+	end)
+
+	Remotes.GetEvent("RequestEquipTrail").OnServerEvent:Connect(function(player: Player, payload: any)
+		local profile = profiles[player]
+		if not profile or type(payload) ~= "table" then
+			return
+		end
+		local zIdx = tonumber(payload.ZoneIndex)
+		if zIdx then
+			local ok, msg = ProgressionLogic.EquipZoneTrail(profile, zIdx)
+			PlayerStateService.Toast(player, msg, if ok then "success" else "warn")
+			if ok then
+				PlayerStateService.Sync(player)
+			end
+		end
 	end)
 end
 

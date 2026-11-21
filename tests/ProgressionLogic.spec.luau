@@ -2,8 +2,9 @@
 --[[
 	tests/ProgressionLogic.spec.luau
 	Unit tests for player profile reducers: Pull-Up Bar training, Throw Power & Gym Tier
-	upgrades, Plot Slot expansion (+4 SLOTS for $5K), throw rewards & slime drops,
-	and passive income collection.
+	upgrades, Plot Slot expansion (+4 SLOTS for $5K), throw rewards, Mutations, "1 in X"
+	odds, Slime Index discovery & Zone Trail bonuses, Hotbar-to-Slot manual placement,
+	Shop Free Gift claim, and Featured Egg hatching.
 ]]
 
 local GameConfig = require("../src/ReplicatedStorage/Shared/GameConfig")
@@ -34,7 +35,6 @@ return function(t: any)
 			expect(gain1).toBe(GameConfig.PullUpTiers[1].XPPerRep)
 			expect(p.BaseThrowPower).toBe(5 + gain1)
 
-			-- Upgrade to Tier 2 (Iron Bar)
 			p.Cash = GameConfig.PullUpTiers[2].Cost
 			local ok = ProgressionLogic.PurchasePullUpTier(p)
 			expect(ok).toBe(true)
@@ -98,25 +98,46 @@ return function(t: any)
 		end)
 	end)
 
-	describe("ProgressionLogic - Throw Rewards, Slime Drops & Passive Income", function()
-		it("awards zone-scaled cash, unlocks a zone slime, and auto-places up to MaxSlimes", function()
+	describe("ProgressionLogic - Throw Rewards, Mutations, '1 in X' Odds & Hotbar Placement", function()
+		it("awards zone-scaled cash, rolls mutation & 1-in-X odds, and places in hotbar when requested", function()
 			local p = ProgressionLogic.CreateInitialProfile()
-			-- Roll rare slime in Zone 2 (unitRandom = 0.95)
-			local outcome = ProgressionLogic.EvaluateThrowReward(p, 320, 2, 0.95)
+			-- Roll rare slime in Zone 2 (unitRandom = 0.95) with EMERALD mutation (mutationRandom = 0.80)
+			local outcome = ProgressionLogic.EvaluateThrowReward(p, 320, 2, 0.95, 1.5, 0.80, true)
 
 			expect(outcome.CashEarned).toBeGreaterThan(100)
-			expect(p.Cash).toBe(outcome.CashEarned)
-			expect(outcome.IsNewBestDistance).toBe(true)
-			expect(p.BestDistance).toBe(320)
 			expect(outcome.CaughtSlimeDef.ZoneIndex).toBe(2)
-			expect(outcome.AutoPlaced).toBe(true)
-			expect(#p.OwnedSlimes).toBe(2)
-			expect(#p.PlacedSlimes).toBe(2)
+			expect(outcome.Mutation).toBe("EMERALD")
+			expect(outcome.OddsOneInX).toBeGreaterThanOrEqual(10)
+			expect(outcome.IsSuperLucky).toBe(true)
+			expect(outcome.IsNewDiscovery).toBe(true)
+			expect(#p.UnplacedSlimes).toBe(1)
+
+			-- Second catch of the same slime should have IsNewDiscovery = false
+			local outcome2 = ProgressionLogic.EvaluateThrowReward(p, 320, 2, 0.95, 1.5, 0.10, true)
+			expect(outcome2.CaughtSlimeId).toBe(outcome.CaughtSlimeId)
+			expect(outcome2.IsNewDiscovery).toBe(false)
+		end)
+
+		it("places hotbar slime onto a specific plot slot and picks it back up cleanly", function()
+			local p = ProgressionLogic.CreateInitialProfile()
+			local outcome = ProgressionLogic.EvaluateThrowReward(p, 200, 1, 0.85, 1.2, 0.80, true)
+			local caughtUid = outcome.CaughtInstance.Uid
+			local baseIncome = ProgressionLogic.GetIncomePerSecond(p)
+
+			local okPlace = ProgressionLogic.PlaceSlimeAtSlot(p, caughtUid, 2)
+			expect(okPlace).toBe(true)
+			expect(#p.UnplacedSlimes).toBe(0)
+			expect(p.PlacedSlimesBySlot[2]).toBeTruthy()
+			expect(ProgressionLogic.GetIncomePerSecond(p)).toBe(baseIncome + outcome.CaughtInstance.IncomePerSec)
+
+			local okPickup = ProgressionLogic.PickupSlimeFromSlot(p, 2)
+			expect(okPickup).toBe(true)
+			expect(#p.UnplacedSlimes).toBe(1)
+			expect(p.PlacedSlimesBySlot[2]).toBe(nil)
 		end)
 
 		it("accumulates passive income over time and transfers whole dollars on Collect", function()
 			local p = ProgressionLogic.CreateInitialProfile()
-			-- Starter slime makes $2/s
 			local pending = ProgressionLogic.TickPassiveIncome(p, 3.7)
 			expect(pending).toBeNear(7.4, 1e-4)
 
@@ -135,6 +156,49 @@ return function(t: any)
 			expect(p.PlacedSlimes[1]).toBe("candy_royal")
 			expect(p.PlacedSlimes[2]).toBe("crystal_quartz")
 			expect(p.PlacedSlimes[3]).toBe("meadow_sprout")
+		end)
+	end)
+
+	describe("ProgressionLogic - Slime Index, Zone Trails & Shop Actions", function()
+		it("calculates Zone Index completion % and unlocks Zone Trail bonus at 100%", function()
+			local p = ProgressionLogic.CreateInitialProfile()
+			-- Meadow starts with 1/3 discovered (33%)
+			local prog1 = ProgressionLogic.GetZoneIndexProgress(p, 1)
+			expect(prog1.UnlockedCount).toBe(1)
+			expect(prog1.TotalCount).toBe(3)
+			expect(prog1.IsComplete).toBe(false)
+
+			local okTrailBefore = ProgressionLogic.EquipZoneTrail(p, 1)
+			expect(okTrailBefore).toBe(false)
+
+			p.DiscoveredSlimes["meadow_honey"] = true
+			p.DiscoveredSlimes["meadow_bloom"] = true
+			local progDone = ProgressionLogic.GetZoneIndexProgress(p, 1)
+			expect(progDone.Percent).toBe(100)
+			expect(progDone.IsComplete).toBe(true)
+
+			local okTrailAfter = ProgressionLogic.EquipZoneTrail(p, 1)
+			expect(okTrailAfter).toBe(true)
+			expect(p.EquippedTrailZone).toBe(1)
+		end)
+
+		it("claims the Shop Free Gift slime once and hatches Featured Eggs", function()
+			local p = ProgressionLogic.CreateInitialProfile()
+			local okGift1, _, giftInst = ProgressionLogic.ClaimFreeGiftSlime(p)
+			expect(okGift1).toBe(true)
+			expect(giftInst).toBeTruthy()
+			expect(#p.UnplacedSlimes).toBe(1)
+
+			local okGift2 = ProgressionLogic.ClaimFreeGiftSlime(p)
+			expect(okGift2).toBe(false)
+
+			p.Cash = 500
+			local okEgg, _, hatched = ProgressionLogic.HatchShopEgg(p, "enchanted_egg", 3, function()
+				return 0.5
+			end)
+			expect(okEgg).toBe(true)
+			expect(#hatched).toBe(3)
+			expect(#p.UnplacedSlimes).toBe(4)
 		end)
 	end)
 end

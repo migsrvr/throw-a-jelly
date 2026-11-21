@@ -2,7 +2,8 @@
 --[[
 	tests/ThrowPhysics.spec.luau
 	Unit tests for deterministic throwing physics, zone floor elevation,
-	locked gate collisions, lateral wall bounces, and rolling stop.
+	locked gate collisions, lateral wall bounces, rolling stop, and
+	the 9-segment vertical throw meter evaluator.
 ]]
 
 local GameConfig = require("../src/ReplicatedStorage/Shared/GameConfig")
@@ -12,6 +13,24 @@ return function(t: any)
 	local describe = t.describe
 	local it = t.it
 	local expect = t.expect
+
+	describe("GameConfig - 9-Segment Vertical Throw Meter", function()
+		it("maps meter ratio [0, 1] across segments 1..9 with monotonic BonusPower and LuckMultiplier", function()
+			local segBottom = GameConfig.EvaluateMeterRatio(0.0)
+			local segMid = GameConfig.EvaluateMeterRatio(0.5)
+			local segTop = GameConfig.EvaluateMeterRatio(1.0)
+
+			expect(segBottom.Index).toBe(1)
+			expect(segMid.Index).toBe(5)
+			expect(segTop.Index).toBe(9)
+
+			expect(segMid.BonusPower).toBeGreaterThan(segBottom.BonusPower)
+			expect(segTop.BonusPower).toBeGreaterThan(segMid.BonusPower)
+
+			expect(segMid.LuckMultiplier).toBeGreaterThan(segBottom.LuckMultiplier)
+			expect(segTop.LuckMultiplier).toBeGreaterThan(segMid.LuckMultiplier)
+		end)
+	end)
 
 	describe("ThrowPhysics - Zone & Gate Helpers", function()
 		it("resolves correct zone and floor elevation across all 5 zones", function()
@@ -65,7 +84,7 @@ return function(t: any)
 			expect(res.Distance).toBeGreaterThan(20)
 			expect(res.Distance).toBeLessThanOrEqual(240)
 			expect(res.LandedZoneIndex).toBe(1)
-			expect(res.FinalPosition.Y).toBeNear(1.0, 0.01) -- Zone 1 FloorY (0) + 1.0 radius
+			expect(res.FinalPosition.Y).toBeNear(1.0, 0.01)
 			expect(res.HitGate).toBe(false)
 		end)
 
@@ -92,8 +111,6 @@ return function(t: any)
 		end)
 
 		it("blocks and rebounds off Zone 2 gate when ThrowPower < 50 even if velocity is huge", function()
-			-- Lightweight slime (0.5 weight) with 49 power has enough speed to cross Z=240,
-			-- but must rebound off the locked Zone 2 Gate at Z=240.
 			local res = ThrowPhysics.Simulate({
 				ThrowPower = 49,
 				ChargeRatio = 1.0,

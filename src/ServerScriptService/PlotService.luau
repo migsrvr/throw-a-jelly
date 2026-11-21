@@ -2,13 +2,13 @@
 --[[
 	PlotService.luau
 	Integrates with existing Studio instances on Plot1..5 and Hub:
-	- PullUpBar (Bar.ProximityPrompt, Bar.Billboard)
-	- SlimeSlots (Slot1..Slot12 visual procedural slimes & idle bobbing)
+	- PullUpBar (Bar.ProximityPrompt, Bar.Billboard with "$Cost / +X XP / rep")
+	- SlimeSlots (Slot1..Slot12 visual mutated slimes, idle bobbing, and slot Prompts
+	  so players can place their hotbar slime directly onto any slot!)
 	- UpgradeStand & UpgradeSign (+4 SLOTS for $5K -> MaxSlimes 8 to 12)
 	- OwnerSign.IncomeBillboard & CollectPad.CollectBillboard + Touched collection
 	- JellyShop.ShopTrigger.ProximityPrompt
 	- Hub.Leaderboards (RARESTSLIME, BESTS, THROWPOWER, MOSTMONEY)
-	- RequestTeleport & RequestTrainRep & RequestCollect
 ]]
 
 local Players = game:GetService("Players")
@@ -16,6 +16,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local CharacterAnimator = require(Shared:WaitForChild("CharacterAnimator"))
 local GameConfig = require(Shared:WaitForChild("GameConfig"))
 local ProgressionLogic = require(Shared:WaitForChild("ProgressionLogic"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
@@ -72,17 +73,13 @@ local function updateCollectBillboard(plot: Model, pendingCash: number)
 	if not bb then
 		return
 	end
-	local labels = {}
 	for _, child in bb:GetChildren() do
 		if child:IsA("TextLabel") then
-			table.insert(labels, child)
-		end
-	end
-	for _, lbl in labels do
-		if lbl.Text == "COLLECT" or string.find(lbl.Text, "COLLECT") then
-			lbl.Text = "COLLECT"
-		else
-			lbl.Text = `${GameConfig.FormatNumber(math.floor(pendingCash))}`
+			if child.Text == "COLLECT" or string.find(child.Text, "COLLECT") then
+				child.Text = "COLLECT"
+			else
+				child.Text = `$${GameConfig.FormatNumber(math.floor(pendingCash))}`
+			end
 		end
 	end
 end
@@ -92,7 +89,7 @@ local function updateOwnerIncomeBillboard(plot: Model, incomePerSec: number)
 	local incomeBb = ownerSign and ownerSign:FindFirstChild("IncomeBillboard")
 	local line1 = incomeBb and incomeBb:FindFirstChild("Line1") :: TextLabel?
 	if line1 then
-		line1.Text = `${GameConfig.FormatNumber(incomePerSec)}/s`
+		line1.Text = `$${GameConfig.FormatNumber(incomePerSec)}/s`
 	end
 end
 
@@ -101,6 +98,7 @@ local function updatePullUpBillboard(plot: Model, tierIndex: number)
 	local bar = pullUp and pullUp:FindFirstChild("Bar")
 	local bb = bar and bar:FindFirstChild("Billboard")
 	local tierDef = GameConfig.PullUpTiers[tierIndex] or GameConfig.PullUpTiers[1]
+	local nextTier = GameConfig.PullUpTiers[tierIndex + 1]
 	if bb then
 		local l1 = bb:FindFirstChild("Line1") :: TextLabel?
 		local l2 = bb:FindFirstChild("Line2") :: TextLabel?
@@ -109,11 +107,12 @@ local function updatePullUpBillboard(plot: Model, tierIndex: number)
 			l1.Text = tierDef.Name
 		end
 		if l2 then
-			local nextTier = GameConfig.PullUpTiers[tierIndex + 1]
-			l2.Text = if nextTier then `Tier {tierDef.Tier}` else "MAX TIER"
+			l2.Text = if nextTier then `Upgrade: $${GameConfig.FormatNumber(nextTier.Cost)}` else "MAX TIER"
+			l2.TextColor3 = Color3.fromRGB(255, 225, 75)
 		end
 		if l3 then
-			l3.Text = `+{tierDef.XPPerRep} Power / rep`
+			l3.Text = `+{tierDef.XPPerRep} XP / rep`
+			l3.TextColor3 = Color3.fromRGB(110, 255, 130)
 		end
 	end
 end
@@ -126,7 +125,7 @@ local function updateUpgradeSign(plot: Model, maxSlimes: number)
 		if maxSlimes >= GameConfig.Slots.ExpandedMaxSlimes then
 			txt.Text = "MAX SLOTS\n<font color='#7CFF7C'>12 / 12</font>"
 		else
-			txt.Text = `+4 SLOTS\n<font color='#7CFF7C'>$${GameConfig.FormatNumber(GameConfig.Slots.ExpansionCost)}</font>`
+			txt.Text = `8 > 12\n<font color='#7CFF7C'>$${GameConfig.FormatNumber(GameConfig.Slots.ExpansionCost)}</font>`
 		end
 	end
 end
@@ -156,13 +155,31 @@ function PlotService.RefreshPlotVisuals(plot: Model, profile: ProgressionLogic.P
 				or tonumber(string.match(slotPart.Name, "%d+"))
 				or 0
 			local unlocked = slotIdx <= maxSlimes
-			slotPart.Color = if unlocked then Color3.fromRGB(115, 220, 135) else Color3.fromRGB(95, 95, 105)
-			slotPart.Transparency = if unlocked then 0.15 else 0.55
+			local inst = if profile and unlocked then profile.PlacedSlimesBySlot[slotIdx] else nil
 
-			if profile and unlocked and slotIdx >= 1 and slotIdx <= #profile.PlacedSlimes then
-				local slimeId = profile.PlacedSlimes[slotIdx]
-				local slimeModel = SlimeFactory.CreateSlimeModel(slimeId, true)
-				local def = GameConfig.SlimesById[slimeId] or GameConfig.Slimes[1]
+			slotPart.Color = if not unlocked
+				then Color3.fromRGB(85, 85, 95)
+				elseif inst then Color3.fromRGB(95, 215, 120)
+				else Color3.fromRGB(240, 255, 150)
+			slotPart.Transparency = if unlocked then 0.12 else 0.58
+
+			local prompt = slotPart:FindFirstChildOfClass("ProximityPrompt")
+			if prompt then
+				prompt.Enabled = unlocked
+				if inst then
+					prompt.ActionText = if profile and #profile.UnplacedSlimes > 0
+						then "Swap / Pick Up Slime"
+						else "Pick Up Slime"
+					prompt.ObjectText = `{inst.Name} ($${GameConfig.FormatNumber(inst.IncomePerSec)}/s)`
+				else
+					prompt.ActionText = "Place Slime"
+					prompt.ObjectText = `Slot #{slotIdx}`
+				end
+			end
+
+			if inst then
+				local slimeModel = SlimeFactory.CreateSlimeModel(inst.SlimeId, true, inst.Mutation, inst.IncomePerSec)
+				local def = GameConfig.SlimesById[inst.SlimeId] or GameConfig.Slimes[1]
 				local radius = (2.4 * def.Scale) * 0.44
 				local baseCf = CFrame.new(slotPart.Position + Vector3.new(0, slotPart.Size.Y * 0.5 + radius, 0))
 				slimeModel:SetAttribute("SlotBaseY", baseCf.Position.Y)
@@ -186,7 +203,7 @@ end
 
 local function performPullUpRep(player: Player)
 	local now = os.clock()
-	if repCooldowns[player] and now - repCooldowns[player] < 0.45 then
+	if repCooldowns[player] and now - repCooldowns[player] < 0.42 then
 		return
 	end
 	repCooldowns[player] = now
@@ -197,15 +214,18 @@ local function performPullUpRep(player: Player)
 	end
 
 	local gained = ProgressionLogic.ApplyPullUpRep(profile)
-
-	-- Subtle hop feedback on character
 	local char = player.Character
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
 	if hum then
 		hum.Jump = true
 	end
+	CharacterAnimator.PlayPullUpAnimation(char)
 
-	PlayerStateService.Toast(player, `+{gained} Throw Power! (Total: {ProgressionLogic.GetEffectiveThrowPower(profile)})`, "power")
+	PlayerStateService.Toast(
+		player,
+		`+{gained} Throw Power! (💪 {ProgressionLogic.GetEffectiveThrowPower(profile)})`,
+		"power"
+	)
 	PlayerStateService.Sync(player)
 end
 
@@ -222,7 +242,7 @@ local function collectPlotCash(player: Player, plot: Model?)
 	end
 	local collected = ProgressionLogic.CollectPendingIncome(profile)
 	if collected > 0 then
-		PlayerStateService.Toast(player, `Collected +$${GameConfig.FormatNumber(collected)} Cash!`, "cash")
+		PlayerStateService.Toast(player, `+$${GameConfig.FormatNumber(collected)} Cash!`, "cash")
 		PlayerStateService.Sync(player)
 		local targetPlot = plot or PlotService.GetPlayerPlot(player)
 		if targetPlot then
@@ -241,16 +261,65 @@ local function wirePlotInteractions(plot: Model)
 			prompt = Instance.new("ProximityPrompt")
 			prompt.Parent = bar
 		end
-		prompt.ActionText = "Do Pull-Up (+Power)"
-		prompt.ObjectText = "Training Bar"
+		prompt.ActionText = "Train Pull-Up (+Power)"
+		prompt.ObjectText = "Pull-Up Bar"
 		prompt.HoldDuration = 0
-		prompt.MaxActivationDistance = 12
+		prompt.MaxActivationDistance = 14
 		prompt.Triggered:Connect(function(triggerPlayer: Player)
 			performPullUpRep(triggerPlayer)
 		end)
 	end
 
-	-- 2. UpgradeStand prompt (+4 SLOTS for $5K)
+	-- 2. SlimeSlots placement prompts (Slot1..Slot12)
+	local slotsFolder = plot:FindFirstChild("SlimeSlots")
+	if slotsFolder then
+		for _, slotPart in slotsFolder:GetChildren() do
+			if slotPart:IsA("BasePart") then
+				local slotIdx = (slotPart:GetAttribute("SlotIndex") :: number?)
+					or tonumber(string.match(slotPart.Name, "%d+"))
+					or 1
+				local prompt = slotPart:FindFirstChildOfClass("ProximityPrompt")
+				if not prompt then
+					prompt = Instance.new("ProximityPrompt")
+					prompt.ActionText = "Place Slime"
+					prompt.ObjectText = `Slot #{slotIdx}`
+					prompt.HoldDuration = 0
+					prompt.MaxActivationDistance = 11
+					prompt.RequiresLineOfSight = false
+					prompt.Parent = slotPart
+				end
+				prompt.Triggered:Connect(function(triggerPlayer: Player)
+					local owner = getPlotOwner(plot)
+					if owner ~= triggerPlayer then
+						PlayerStateService.Toast(triggerPlayer, "That's another player's plot!", "warn")
+						return
+					end
+					local profile = PlayerStateService.GetProfile(triggerPlayer)
+					if not profile then
+						return
+					end
+					if #profile.UnplacedSlimes > 0 then
+						local topSlime = profile.UnplacedSlimes[1]
+						local ok, msg = ProgressionLogic.PlaceSlimeAtSlot(profile, topSlime.Uid, slotIdx)
+						PlayerStateService.Toast(triggerPlayer, msg, if ok then "success" else "warn")
+						if ok then
+							PlayerStateService.Sync(triggerPlayer)
+						end
+					elseif profile.PlacedSlimesBySlot[slotIdx] then
+						local ok, msg = ProgressionLogic.PickupSlimeFromSlot(profile, slotIdx)
+						PlayerStateService.Toast(triggerPlayer, msg, if ok then "info" else "warn")
+						if ok then
+							PlayerStateService.Sync(triggerPlayer)
+						end
+					else
+						PlayerStateService.Toast(triggerPlayer, "Throw bait at the Throw Line to catch a slime first!", "warn")
+					end
+				end)
+			end
+		end
+	end
+
+	-- 3. UpgradeStand prompt (+4 SLOTS for $5K)
 	local upgradeStand = plot:FindFirstChild("UpgradeStand")
 	local standPart = (upgradeStand and (upgradeStand:FindFirstChild("Backing") or upgradeStand:FindFirstChildWhichIsA("BasePart")))
 		or (plot:FindFirstChild("UpgradeSign") :: BasePart?)
@@ -261,7 +330,7 @@ local function wirePlotInteractions(plot: Model)
 			prompt.Parent = standPart
 		end
 		prompt.ActionText = `+4 Slime Slots ($${GameConfig.FormatNumber(GameConfig.Slots.ExpansionCost)})`
-		prompt.ObjectText = "Plot Capacity"
+		prompt.ObjectText = "Plot Capacity (8 -> 12)"
 		prompt.HoldDuration = 0
 		prompt.MaxActivationDistance = 12
 		prompt.Triggered:Connect(function(triggerPlayer: Player)
@@ -272,13 +341,12 @@ local function wirePlotInteractions(plot: Model)
 			local ok, msg = ProgressionLogic.PurchaseSlotExpansion(profile)
 			PlayerStateService.Toast(triggerPlayer, msg, if ok then "success" else "warn")
 			if ok then
-				ProgressionLogic.PlaceBestSlimes(profile)
 				PlayerStateService.Sync(triggerPlayer)
 			end
 		end)
 	end
 
-	-- 3. CollectPad touch
+	-- 4. CollectPad touch
 	local collectPad = plot:FindFirstChild("CollectPad")
 	if collectPad and collectPad:IsA("BasePart") then
 		collectPad.Touched:Connect(function(hit: BasePart)
@@ -294,7 +362,6 @@ local function wirePlotInteractions(plot: Model)
 		end)
 	end
 
-	-- React to Owner attribute changes from PlotAssignment.server.luau
 	plot:GetAttributeChangedSignal("Owner"):Connect(function()
 		local owner = getPlotOwner(plot)
 		local profile = if owner then PlayerStateService.GetProfile(owner) else nil
@@ -454,22 +521,26 @@ function PlotService.Init()
 		end
 	end)
 
-	-- Passive income loop (every 1s)
+	-- Passive income loop: auto-credits cash directly into player wallet (like Clip 2 "$0 -> $10 -> $19")
+	-- while also keeping CollectPad available for bonus collection!
 	task.spawn(function()
 		while true do
 			task.wait(1.0)
 			for player, profile in PlayerStateService.GetAllProfiles() do
-				ProgressionLogic.TickPassiveIncome(profile, 1.0)
+				local rate = ProgressionLogic.GetIncomePerSecond(profile)
+				if rate > 0 then
+					profile.Cash += rate
+					PlayerStateService.Sync(player)
+				end
 				local plot = PlotService.GetPlayerPlot(player)
 				if plot then
-					updateCollectBillboard(plot, profile.PendingIncome)
+					updateCollectBillboard(plot, rate)
 				end
 			end
 			updateHubLeaderboards()
 		end
 	end)
 
-	-- Gentle idle bobbing animation for placed plot slimes
 	local accum = 0
 	RunService.Heartbeat:Connect(function(dt: number)
 		accum += dt

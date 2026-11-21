@@ -1,9 +1,10 @@
 --!strict
 --[[
 	ThrowService.luau
-	Validates throw requests, executes authoritative ThrowPhysics simulation,
-	awards zone Cash & Slime drops via ProgressionLogic, and broadcasts
-	ThrowBroadcast for smooth 60fps client visualization.
+	Validates throw requests from the 9-segment vertical meter, computes authoritative
+	ThrowPhysics trajectory, rolls caught Slime + Mutation + "1 in X" odds via
+	ProgressionLogic (placing caught slimes into the player's Hotbar), and broadcasts
+	ThrowBroadcast for the flight camera & cinematic reveal cutscene.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -36,13 +37,13 @@ function ThrowService.Init()
 			return
 		end
 
-		local chargeRatio = 0.75
+		local meterRatio = 0.75
 		local pitchDeg = GameConfig.Physics.DefaultPitchDeg
 		local yawDeg = 0
 
 		if type(payload) == "table" then
 			if type(payload.ChargeRatio) == "number" then
-				chargeRatio = math.clamp(payload.ChargeRatio, 0.15, 1.0)
+				meterRatio = math.clamp(payload.ChargeRatio, 0, 1)
 			end
 			if type(payload.PitchDeg) == "number" then
 				pitchDeg = math.clamp(payload.PitchDeg, GameConfig.Physics.MinPitchDeg, GameConfig.Physics.MaxPitchDeg)
@@ -52,6 +53,8 @@ function ThrowService.Init()
 			end
 		end
 
+		local meterSeg = GameConfig.EvaluateMeterRatio(meterRatio)
+
 		local launchX = 0
 		local char = player.Character
 		local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
@@ -60,23 +63,27 @@ function ThrowService.Init()
 		end
 
 		local origin = Vector3.new(launchX, GameConfig.Hub.FloorY + 1.8, GameConfig.Hub.ThrowLineZ)
-		local effectivePower = ProgressionLogic.GetEffectiveThrowPower(profile)
+		local effectivePower = ProgressionLogic.GetEffectiveThrowPower(profile) + meterSeg.BonusPower
 		local equippedDef = GameConfig.SlimesById[profile.EquippedSlimeId] or GameConfig.Slimes[1]
 
 		local simResult = ThrowPhysics.Simulate({
 			Origin = origin,
 			ThrowPower = effectivePower,
-			ChargeRatio = chargeRatio,
+			ChargeRatio = math.clamp(0.35 + 0.65 * meterRatio, 0.25, 1.0),
 			PitchDeg = pitchDeg,
 			YawDeg = yawDeg,
 			SlimeWeight = equippedDef.Weight,
 		})
 
+		-- Put newly caught slime into Hotbar (UnplacedSlimes) so the player can equip & place it (Clip 1/2 flow!)
 		local reward = ProgressionLogic.EvaluateThrowReward(
 			profile,
 			simResult.Distance,
 			simResult.LandedZoneIndex,
-			nil
+			nil,
+			meterSeg.LuckMultiplier,
+			nil,
+			true
 		)
 
 		PlayerStateService.Sync(player)
@@ -89,13 +96,17 @@ function ThrowService.Init()
 			PlayerName = player.DisplayName,
 			Origin = origin,
 			ThrowPower = effectivePower,
-			ChargeRatio = chargeRatio,
+			ChargeRatio = math.clamp(0.35 + 0.65 * meterRatio, 0.25, 1.0),
+			MeterRatio = meterRatio,
+			BonusPower = meterSeg.BonusPower,
+			LuckMultiplier = meterSeg.LuckMultiplier,
 			PitchDeg = pitchDeg,
 			YawDeg = yawDeg,
 			SlimeId = equippedDef.Id,
 			SlimeWeight = equippedDef.Weight,
 			Distance = simResult.Distance,
 			LandedZoneName = zoneDef.Name,
+			LandedZoneEmoji = zoneDef.Emoji,
 			LandedZoneIndex = simResult.LandedZoneIndex,
 			HitGate = simResult.HitGate,
 			BlockedByZoneName = if blockedZone then blockedZone.Name else nil,
@@ -103,7 +114,13 @@ function ThrowService.Init()
 			CashEarned = reward.CashEarned,
 			CaughtSlimeId = reward.CaughtSlimeId,
 			CaughtSlimeName = reward.CaughtSlimeDef.Name,
+			CaughtShortWord = reward.CaughtSlimeDef.ShortWord,
 			CaughtSlimeRarity = reward.CaughtSlimeDef.Rarity,
+			CaughtMutation = reward.Mutation,
+			CaughtIncomePerSec = reward.CaughtInstance.IncomePerSec,
+			OddsOneInX = reward.OddsOneInX,
+			IsSuperLucky = reward.IsSuperLucky,
+			IsNewDiscovery = reward.IsNewDiscovery,
 			AutoPlaced = reward.AutoPlaced,
 			IsNewBest = reward.IsNewBestDistance,
 		})
