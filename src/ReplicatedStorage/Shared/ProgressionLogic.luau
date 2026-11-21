@@ -50,6 +50,18 @@ export type PlayerProfile = {
 	PendingIncome: number,
 	TotalThrows: number,
 	TotalPullUps: number,
+	StrengthLevel: number, -- pull-up level; each level up = +GameConfig.Training.PowerPerLevel Throw Power
+	TrainingXP: number, -- XP toward the next StrengthLevel
+	BaitTier: number, -- index into GameConfig.BaitTiers
+}
+
+export type PullUpRepResult = {
+	XPGained: number,
+	LevelsGained: number,
+	PowerGained: number,
+	NewLevel: number,
+	CurrentXP: number,
+	RequiredXP: number,
 }
 
 export type ThrowRewardOutcome = {
@@ -128,6 +140,9 @@ function ProgressionLogic.CreateInitialProfile(): PlayerProfile
 		PendingIncome = 0,
 		TotalThrows = 0,
 		TotalPullUps = 0,
+		StrengthLevel = 1,
+		TrainingXP = 0,
+		BaitTier = 1,
 	}
 	local starter = makeSlimeInstance(profile, "meadow_sprout", "NORMAL")
 	profile.PlacedSlimesBySlot[1] = starter
@@ -197,14 +212,55 @@ function ProgressionLogic.GetRarestSlimeDef(profile: PlayerProfile): GameConfig.
 	return bestDef
 end
 
-function ProgressionLogic.ApplyPullUpRep(profile: PlayerProfile): number
+-- One pull-up rep: adds Training XP (bar tier XPPerRep x x2 boost x trail x repMultiplier), then levels
+-- up as many times as the XP covers. Each level up adds GameConfig.Training.PowerPerLevel Throw Power.
+-- repMultiplier is GameConfig.Training.BonusRepMultiplier for a clicked Bonus Rep.
+function ProgressionLogic.ApplyPullUpRep(profile: PlayerProfile, repMultiplier: number?): PullUpRepResult
 	local tierDef = GameConfig.PullUpTiers[profile.PullUpTier] or GameConfig.PullUpTiers[1]
 	local xpBoost = if profile.OwnedBoosts.double_power then 2.0 else 1.0
 	local trailMult = ProgressionLogic.GetTrailMultiplier(profile, "XP")
-	local gained = math.max(1, math.floor(tierDef.XPPerRep * xpBoost * trailMult + 0.5))
-	profile.BaseThrowPower += gained
+	local mult = math.max(0, repMultiplier or 1)
+	local xpGained = math.max(1, math.floor(tierDef.XPPerRep * mult * xpBoost * trailMult + 0.5))
+
+	profile.TrainingXP += xpGained
 	profile.TotalPullUps += 1
-	return gained
+
+	local levels = 0
+	local required = GameConfig.GetXPRequiredForLevel(profile.StrengthLevel)
+	while profile.TrainingXP >= required do
+		profile.TrainingXP -= required
+		profile.StrengthLevel += 1
+		levels += 1
+		required = GameConfig.GetXPRequiredForLevel(profile.StrengthLevel)
+	end
+	local powerGained = levels * GameConfig.Training.PowerPerLevel
+	profile.BaseThrowPower += powerGained
+
+	return {
+		XPGained = xpGained,
+		LevelsGained = levels,
+		PowerGained = powerGained,
+		NewLevel = profile.StrengthLevel,
+		CurrentXP = profile.TrainingXP,
+		RequiredXP = required,
+	}
+end
+
+function ProgressionLogic.PurchaseBaitTier(profile: PlayerProfile): (boolean, string)
+	local nextTier = GameConfig.BaitTiers[profile.BaitTier + 1]
+	if not nextTier then
+		return false, "Your Jelly Bait is already at Max Tier!"
+	end
+	if profile.Cash < nextTier.Cost then
+		return false, `Need $${GameConfig.FormatNumber(nextTier.Cost)} Cash`
+	end
+	profile.Cash -= nextTier.Cost
+	profile.BaitTier += 1
+	return true, `Unlocked {nextTier.Name} ({nextTier.LuckMultiplier}x Luck)!`
+end
+
+function ProgressionLogic.GetBaitDef(profile: { BaitTier: number? }): GameConfig.BaitTierDef
+	return GameConfig.BaitTiers[profile.BaitTier or 1] or GameConfig.BaitTiers[1]
 end
 
 function ProgressionLogic.PurchasePowerUpgrade(profile: PlayerProfile): (boolean, string)
@@ -228,7 +284,7 @@ function ProgressionLogic.PurchasePullUpTier(profile: PlayerProfile): (boolean, 
 	end
 	profile.Cash -= nextTier.Cost
 	profile.PullUpTier = nextTierIndex
-	return true, `Unlocked {nextTier.Name} (+{nextTier.XPPerRep} Power/rep)!`
+	return true, `Unlocked {nextTier.Name} (+{nextTier.XPPerRep} XP/rep)!`
 end
 
 function ProgressionLogic.PurchaseSlotExpansion(profile: PlayerProfile): (boolean, string)
@@ -512,6 +568,250 @@ function ProgressionLogic.HatchShopEgg(
 		then `Hatched {first.Mutation ~= "NORMAL" and (first.Mutation .. " ") or ""}{first.Name} (+$${first.IncomePerSec}/s)!`
 		else `Hatched {num}x Slimes from {egg.Name}!`
 	return true, summary, hatched
+end
+
+-- ============================================================================
+-- PULL-UP LOOP SPEED (strength + bar tier)
+-- ============================================================================
+
+-- Seconds per pull-up rep. Shrinks with strength (BaseThrowPower) and the bar tier's SpeedMult,
+-- clamped to [MinRepSeconds, BaseRepSeconds]. Each rep still pays the tier's XPPerRep, so
+-- faster reps mean more XP per second.
+function ProgressionLogic.GetPullUpRepInterval(profile: { BaseThrowPower: number, PullUpTier: number }): number
+	local cfg = GameConfig.PullUp
+	local tierDef = GameConfig.PullUpTiers[profile.PullUpTier] or GameConfig.PullUpTiers[1]
+	local power = math.max(0, profile.BaseThrowPower or 0)
+	local strengthSpeed = 1 + cfg.StrengthLogScale * math.log10(1 + power / cfg.StrengthRef)
+	local interval = cfg.BaseRepSeconds / (tierDef.SpeedMult * strengthSpeed)
+	return math.clamp(interval, cfg.MinRepSeconds, cfg.BaseRepSeconds)
+end
+
+-- ============================================================================
+-- SHOP: one listing for the UI + one purchase entry point
+-- ============================================================================
+
+export type ShopQuantity = number | "max"
+
+export type ShopOption = {
+	Quantity: ShopQuantity,
+	Label: string,
+	Price: number,
+	CanAfford: boolean,
+}
+
+export type ShopState = "Available" | "Unaffordable" | "Owned" | "Maxed" | "Claimed"
+
+export type ShopListingEntry = {
+	Id: string,
+	Category: string,
+	Icon: string,
+	Color: { number },
+	Title: string,
+	Subtitle: string,
+	Price: number,
+	PriceText: string,
+	State: ShopState,
+	Options: { ShopOption },
+}
+
+-- Anything with these fields works: the server PlayerProfile OR the client's synced state table.
+export type ShopStateInput = {
+	Cash: number?,
+	PowerUpgradeLevel: number?,
+	PullUpTier: number?,
+	BaitTier: number?,
+	MaxSlimes: number?,
+	OwnedBoosts: { [string]: boolean }?,
+	ClaimedFreeGift: boolean?,
+}
+
+local function priceText(price: number): string
+	return if price <= 0 then "FREE" else `${GameConfig.FormatNumber(price)}`
+end
+
+local function option(quantity: ShopQuantity, label: string, price: number, cash: number): ShopOption
+	return { Quantity = quantity, Label = label, Price = price, CanAfford = cash >= price }
+end
+
+local function buildListingEntry(item: GameConfig.ShopCatalogItem, s: ShopStateInput): ShopListingEntry
+	local cash = s.Cash or 0
+	local entry: ShopListingEntry = {
+		Id = item.Id,
+		Category = item.Category,
+		Icon = item.Icon,
+		Color = item.Color,
+		Title = item.Id,
+		Subtitle = "",
+		Price = 0,
+		PriceText = "",
+		State = "Available",
+		Options = {},
+	}
+
+	local function setPrice(price: number)
+		entry.Price = price
+		entry.PriceText = priceText(price)
+		entry.State = if cash >= price then "Available" else "Unaffordable"
+	end
+
+	if item.Action == "PowerUpgrade" then
+		local lvl = s.PowerUpgradeLevel or 1
+		local cost = GameConfig.GetPowerUpgradeCost(lvl)
+		local gain = GameConfig.GetPowerUpgradeBonus(lvl + 1) - GameConfig.GetPowerUpgradeBonus(lvl)
+		entry.Title = `Upgrade Power (Lv.{lvl})`
+		entry.Subtitle = `+{GameConfig.FormatNumber(gain)} Throw Power`
+		setPrice(cost)
+		entry.Options = { option(1, "Buy", cost, cash), option("max", "Buy Max", cost, cash) }
+	elseif item.Action == "PullUpTier" then
+		local nextTier = GameConfig.PullUpTiers[(s.PullUpTier or 1) + 1]
+		if nextTier then
+			entry.Title = nextTier.Name
+			entry.Subtitle = `+{nextTier.XPPerRep} XP/rep, {nextTier.SpeedMult}x rep speed`
+			setPrice(nextTier.Cost)
+			entry.Options = { option(1, "Buy", nextTier.Cost, cash) }
+		else
+			local cur = GameConfig.PullUpTiers[#GameConfig.PullUpTiers]
+			entry.Title = cur.Name
+			entry.Subtitle = "Pull-Up Bar is at MAX TIER"
+			entry.State = "Maxed"
+			entry.PriceText = "MAX"
+		end
+	elseif item.Action == "BaitTier" then
+		local curTier = GameConfig.BaitTiers[s.BaitTier or 1] or GameConfig.BaitTiers[1]
+		local nextTier = GameConfig.BaitTiers[(s.BaitTier or 1) + 1]
+		if nextTier then
+			entry.Title = nextTier.Name
+			entry.Subtitle = `Bait Luck {curTier.LuckMultiplier}x -> {nextTier.LuckMultiplier}x`
+			setPrice(nextTier.Cost)
+			entry.Options = { option(1, "Buy", nextTier.Cost, cash) }
+		else
+			entry.Title = curTier.Name
+			entry.Subtitle = `Jelly Bait is at MAX TIER ({curTier.LuckMultiplier}x Luck)`
+			entry.State = "Maxed"
+			entry.PriceText = "MAX"
+		end
+	elseif item.Action == "SlotExpansion" then
+		local cost = GameConfig.Slots.ExpansionCost
+		entry.Title = `+{GameConfig.Slots.ExpandedMaxSlimes - GameConfig.Slots.InitialMaxSlimes} Slime Slots`
+		entry.Subtitle = `Plot capacity {GameConfig.Slots.InitialMaxSlimes} -> {GameConfig.Slots.ExpandedMaxSlimes}`
+		if (s.MaxSlimes or GameConfig.Slots.InitialMaxSlimes) >= GameConfig.Slots.ExpandedMaxSlimes then
+			entry.State = "Maxed"
+			entry.PriceText = "MAX"
+		else
+			setPrice(cost)
+			entry.Options = { option(1, "Buy", cost, cash) }
+		end
+	elseif item.Action == "Boost" then
+		local boostId = item.Args.BoostId or ""
+		local boost = (GameConfig.ShopBoosts :: any)[boostId]
+		if boost then
+			entry.Title = boost.Name
+			entry.Subtitle = boost.Description
+			if s.OwnedBoosts and s.OwnedBoosts[boostId] then
+				entry.State = "Owned"
+				entry.PriceText = "OWNED"
+			else
+				setPrice(boost.Cost)
+				entry.Options = { option(1, "Buy", boost.Cost, cash) }
+			end
+		end
+	elseif item.Action == "Egg" then
+		local egg = GameConfig.ShopEggsById[item.Args.EggId or ""]
+		if egg then
+			entry.Title = egg.Name
+			entry.Subtitle = egg.Tag
+			setPrice(egg.Buy1Cost)
+			entry.Options = {
+				option(1, `Buy x1 ({priceText(egg.Buy1Cost)})`, egg.Buy1Cost, cash),
+				option(3, `Buy x3 ({priceText(egg.Buy3Cost)})`, egg.Buy3Cost, cash),
+			}
+		end
+	elseif item.Action == "FreeGift" then
+		entry.Title = GameConfig.FreeGift.Title
+		entry.Subtitle = GameConfig.FreeGift.Subtitle
+		if s.ClaimedFreeGift then
+			entry.State = "Claimed"
+			entry.PriceText = "CLAIMED"
+		else
+			setPrice(0)
+			entry.Options = { option(1, "CLAIM!", 0, cash) }
+		end
+	end
+
+	return entry
+end
+
+-- Everything the shop UI needs to render, in catalog order. Pure: safe on client and server.
+function ProgressionLogic.GetShopListing(state: ShopStateInput): { ShopListingEntry }
+	local list = {}
+	for _, item in GameConfig.ShopCatalog do
+		table.insert(list, buildListingEntry(item, state))
+	end
+	return list
+end
+
+function ProgressionLogic.GetShopListingEntry(state: ShopStateInput, itemId: string): ShopListingEntry?
+	local item = GameConfig.ShopCatalogById[itemId]
+	return if item then buildListingEntry(item, state) else nil
+end
+
+local MAX_BULK_BUYS = 200
+
+-- The single purchase entry point. Validates the item id + quantity, then dispatches to the
+-- existing reducers (PurchasePowerUpgrade, HatchShopEgg, ...). Returns (ok, message, result):
+-- result is the hatched/claimed SlimeInstances for eggs/gift, or the number of upgrades bought.
+function ProgressionLogic.Purchase(profile: PlayerProfile, itemId: string, quantity: ShopQuantity?): (boolean, string, any)
+	local item = GameConfig.ShopCatalogById[itemId]
+	if not item then
+		return false, "Unknown shop item", nil
+	end
+	local qty: ShopQuantity = if quantity == nil then 1 else quantity
+
+	if item.Action == "PowerUpgrade" then
+		if qty == 1 then
+			local ok, msg = ProgressionLogic.PurchasePowerUpgrade(profile)
+			return ok, msg, if ok then 1 else 0
+		elseif qty == "max" then
+			local bought = 0
+			local lastMsg = ""
+			while bought < MAX_BULK_BUYS do
+				local ok, msg = ProgressionLogic.PurchasePowerUpgrade(profile)
+				if not ok then
+					lastMsg = msg
+					break
+				end
+				bought += 1
+			end
+			if bought == 0 then
+				return false, lastMsg, 0
+			end
+			return true, `Bought {bought}x Power Upgrades (Lv.{profile.PowerUpgradeLevel})!`, bought
+		end
+	elseif item.Action == "Egg" then
+		if qty == 1 or qty == 3 then
+			local ok, msg, hatched = ProgressionLogic.HatchShopEgg(profile, item.Args.EggId or "", qty :: number, nil)
+			return ok, msg, hatched
+		end
+	elseif qty == 1 then
+		if item.Action == "PullUpTier" then
+			local ok, msg = ProgressionLogic.PurchasePullUpTier(profile)
+			return ok, msg, nil
+		elseif item.Action == "BaitTier" then
+			local ok, msg = ProgressionLogic.PurchaseBaitTier(profile)
+			return ok, msg, nil
+		elseif item.Action == "SlotExpansion" then
+			local ok, msg = ProgressionLogic.PurchaseSlotExpansion(profile)
+			return ok, msg, nil
+		elseif item.Action == "Boost" then
+			local ok, msg = ProgressionLogic.PurchaseShopBoost(profile, item.Args.BoostId or "")
+			return ok, msg, nil
+		elseif item.Action == "FreeGift" then
+			local ok, msg, inst = ProgressionLogic.ClaimFreeGiftSlime(profile)
+			return ok, msg, if inst then { inst } else nil
+		end
+	end
+
+	return false, "Invalid quantity for this item", nil
 end
 
 function ProgressionLogic.TickPassiveIncome(profile: PlayerProfile, dtSeconds: number): number

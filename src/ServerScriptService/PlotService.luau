@@ -2,7 +2,7 @@
 --[[
 	PlotService.luau
 	Integrates with existing Studio instances on Plot1..5 and Hub:
-	- PullUpBar (Bar.ProximityPrompt, Bar.Billboard with "$Cost / +X XP / rep")
+	- PullUpBar (Bar.ProximityPrompt toggles the looping pull-up training, Bar.Billboard)
 	- SlimeSlots (Slot1..Slot12 visual mutated slimes, idle bobbing, and slot Prompts
 	  so players can place their hotbar slime directly onto any slot!)
 	- UpgradeStand & UpgradeSign (+4 SLOTS for $5K -> MaxSlimes 8 to 12)
@@ -16,7 +16,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
-local CharacterAnimator = require(Shared:WaitForChild("CharacterAnimator"))
 local GameConfig = require(Shared:WaitForChild("GameConfig"))
 local ProgressionLogic = require(Shared:WaitForChild("ProgressionLogic"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
@@ -27,7 +26,6 @@ local PlayerStateService = require(script.Parent:WaitForChild("PlayerStateServic
 local PlotService = {}
 
 local plotSlotModels: { [Instance]: { [number]: Model } } = {}
-local repCooldowns: { [Player]: number } = {}
 local collectCooldowns: { [Player]: number } = {}
 
 local function getBasesFolder(): Folder?
@@ -201,32 +199,294 @@ function PlotService.RefreshPlotVisuals(plot: Model, profile: ProgressionLogic.P
 	updateUpgradeSign(plot, maxSlimes)
 end
 
-local function performPullUpRep(player: Player)
-	local now = os.clock()
-	if repCooldowns[player] and now - repCooldowns[player] < 0.42 then
+-- ============================================================================
+-- PULL-UP TRAINING LOOP (server-authoritative cadence; the client only animates)
+-- E on the bar toggles training. Reps are paid every GetPullUpRepInterval(profile) seconds,
+-- re-read each rep so strength gains / bar upgrades speed the loop up live.
+-- ============================================================================
+type TrainingSession = {
+	Bar: BasePart,
+	Character: Model,
+	Root: BasePart,
+	Humanoid: Humanoid,
+	HangCFrame: CFrame,
+	-- Constraints that pin the HRP under the bar. NOT anchoring: an anchored assembly becomes
+	-- server-owned and the client's local joint (C0) posing never shows, freezing the character.
+	Hold: { Instance },
+	StartedAt: number,
+	NextRepAt: number,
+	Reps: number,
+	-- Bonus Rep offers are scheduled by the SERVER (not the client), so an exploiter can only claim
+	-- offers the server actually made, inside their window, at most once each.
+	NextBonusAt: number,
+	BonusId: number, -- id of the currently offered Bonus Rep (0 = none)
+	BonusExpiresAt: number,
+	LastBonusAt: number,
+}
+
+local HOLD_BREAK_DISTANCE = 4 -- studs the HRP may drift from the hang spot before training auto-stops
+
+local function createHold(root: BasePart, hangCf: CFrame): { Instance }
+	local att = Instance.new("Attachment")
+	att.Name = "TrainHoldAttachment"
+	att.Parent = root
+
+	local alignPos = Instance.new("AlignPosition")
+	alignPos.Name = "TrainHoldPosition"
+	alignPos.Mode = Enum.PositionAlignmentMode.OneAttachment
+	alignPos.Attachment0 = att
+	alignPos.RigidityEnabled = true
+	alignPos.Position = hangCf.Position
+	alignPos.Parent = root
+
+	local alignOri = Instance.new("AlignOrientation")
+	alignOri.Name = "TrainHoldOrientation"
+	alignOri.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	alignOri.Attachment0 = att
+	alignOri.RigidityEnabled = true
+	alignOri.CFrame = hangCf.Rotation
+	alignOri.Parent = root
+
+	return { alignPos, alignOri, att }
+end
+
+local training: { [Player]: TrainingSession } = {}
+local toggleCooldowns: { [Player]: number } = {}
+local bonusIdCounter = 0
+local bonusRng = Random.new()
+
+local function nextBonusDelay(): number
+	local cfg = GameConfig.Training
+	return bonusRng:NextNumber(cfg.BonusRepIntervalMin, cfg.BonusRepIntervalMax)
+end
+
+-- Everything the client needs to update the XP bar / level-up popup after a (bonus) rep
+local function repPayload(profile: ProgressionLogic.PlayerProfile, result: ProgressionLogic.PullUpRepResult, interval: number, isBonus: boolean)
+	return {
+		XPGained = result.XPGained,
+		LevelsGained = result.LevelsGained,
+		PowerGained = result.PowerGained,
+		StrengthLevel = result.NewLevel,
+		CurrentXP = result.CurrentXP,
+		RequiredXP = result.RequiredXP,
+		Power = ProgressionLogic.GetEffectiveThrowPower(profile),
+		Interval = interval,
+		IsBonus = isBonus,
+	}
+end
+
+local HANG_DROP = 3.0 -- HumanoidRootPart sits this far below the bar with arms straight up
+local STAND_HEIGHT = 3.0 -- approx. HumanoidRootPart height above the floor when standing
+
+-- Where the character hangs: under the bar's centre, facing across the bar.
+local function getHangCFrame(bar: BasePart, trainSpot: BasePart?): CFrame
+	local cf = bar.CFrame
+	local size = bar.Size
+	-- The bar's long axis is its largest horizontal dimension (Cylinder parts run along X)
+	local longAxis = if bar:IsA("Part") and bar.Shape == Enum.PartType.Cylinder
+		then cf.RightVector
+		elseif size.X >= size.Z then cf.RightVector
+		else cf.LookVector
+	local facing = Vector3.new(longAxis.X, 0, longAxis.Z):Cross(Vector3.yAxis)
+	if facing.Magnitude < 1e-3 then
+		facing = Vector3.new(0, 0, 1)
+	end
+	facing = facing.Unit
+
+	local hangPos = bar.Position - Vector3.new(0, HANG_DROP, 0)
+	if trainSpot then
+		-- Face away from the TrainSpot side, and never sink the body below a standing pose
+		local toBar = Vector3.new(bar.Position.X - trainSpot.Position.X, 0, bar.Position.Z - trainSpot.Position.Z)
+		if toBar.Magnitude > 0.1 and toBar:Dot(facing) < 0 then
+			facing = -facing
+		end
+		local minY = trainSpot.Position.Y + trainSpot.Size.Y * 0.5 + STAND_HEIGHT
+		hangPos = Vector3.new(hangPos.X, math.max(hangPos.Y, minY), hangPos.Z)
+	end
+	return CFrame.lookAt(hangPos, hangPos + facing)
+end
+
+local function stopTraining(player: Player, reason: string?)
+	local session = training[player]
+	if not session then
 		return
 	end
-	repCooldowns[player] = now
+	training[player] = nil
 
+	for _, inst in session.Hold do
+		inst:Destroy()
+	end
+	if session.Humanoid.Parent then
+		session.Humanoid.PlatformStand = false
+		if session.Humanoid.Health > 0 then
+			session.Humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+		end
+	end
+	Remotes.GetEvent("TrainingState"):FireClient(player, { Active = false, Reason = reason })
+	if session.Reps > 0 then
+		PlayerStateService.Toast(player, `Training done: {session.Reps} reps!`, "power")
+	end
+	PlayerStateService.Sync(player)
+end
+
+local function startTraining(player: Player, plot: Model, bar: BasePart)
+	local profile = PlayerStateService.GetProfile(player)
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not profile or not char or not hum or hum.Health <= 0 or not root then
+		return
+	end
+	if getPlotOwner(plot) ~= player then
+		PlayerStateService.Toast(player, "Train on your own pull-up bar!", "warn")
+		return
+	end
+	if (root.Position - bar.Position).Magnitude > GameConfig.PullUp.MaxTrainDistance then
+		return
+	end
+
+	local pullUp = bar.Parent
+	local trainSpot = pullUp and pullUp:FindFirstChild("TrainSpot") :: BasePart?
+	local hangCf = getHangCFrame(bar, if trainSpot and trainSpot:IsA("BasePart") then trainSpot else nil)
+	char:PivotTo(hangCf)
+	root.AssemblyLinearVelocity = Vector3.zero
+	root.AssemblyAngularVelocity = Vector3.zero
+	-- PlatformStand stops the Humanoid state machine/Animate (falling, walking) while hanging
+	hum.PlatformStand = true
+
+	local interval = ProgressionLogic.GetPullUpRepInterval(profile)
+	training[player] = {
+		Bar = bar,
+		Character = char,
+		Root = root,
+		Humanoid = hum,
+		HangCFrame = hangCf,
+		Hold = createHold(root, hangCf),
+		StartedAt = os.clock(),
+		-- First rep at half an interval: the client animation starts at the dead hang (phase 0) and
+		-- peaks (chin over bar) at phase 0.5, so every paid rep lands on the peak.
+		NextRepAt = os.clock() + interval * 0.5,
+		Reps = 0,
+		NextBonusAt = os.clock() + nextBonusDelay(),
+		BonusId = 0,
+		BonusExpiresAt = 0,
+		LastBonusAt = 0,
+	}
+	Remotes.GetEvent("TrainingState"):FireClient(player, {
+		Active = true,
+		Interval = interval,
+		StrengthLevel = profile.StrengthLevel,
+		CurrentXP = profile.TrainingXP,
+		RequiredXP = GameConfig.GetXPRequiredForLevel(profile.StrengthLevel),
+	})
+end
+
+local function toggleTraining(player: Player, plot: Model, bar: BasePart)
+	local now = os.clock()
+	if toggleCooldowns[player] and now - toggleCooldowns[player] < 0.3 then
+		return
+	end
+	toggleCooldowns[player] = now
+
+	if training[player] then
+		stopTraining(player, "toggle")
+	else
+		startTraining(player, plot, bar)
+	end
+end
+
+local function stepTraining()
+	local now = os.clock()
+	for player, session in training do
+		local hum = session.Humanoid
+		if
+			player.Character ~= session.Character
+			or not session.Root.Parent
+			or not hum.Parent
+			or hum.Health <= 0
+			-- something moved them off the bar (also stops a client walking away while still earning).
+			-- Grace period: the client owns the character, so the snap takes a moment to replicate back.
+			or (
+				now - session.StartedAt > 1.0
+				and (session.Root.Position - session.HangCFrame.Position).Magnitude > HOLD_BREAK_DISTANCE
+			)
+		then
+			stopTraining(player, "interrupted")
+			continue
+		end
+
+		if now >= session.NextRepAt then
+			local profile = PlayerStateService.GetProfile(player)
+			if not profile then
+				stopTraining(player, "interrupted")
+				continue
+			end
+			local result = ProgressionLogic.ApplyPullUpRep(profile)
+			session.Reps += 1
+			local interval = ProgressionLogic.GetPullUpRepInterval(profile)
+			-- Schedule from the previous deadline (steady cadence), but never "catch up" after a lag spike
+			session.NextRepAt = math.max(session.NextRepAt + interval, now + interval * 0.5)
+
+			Remotes.GetEvent("TrainingRep"):FireClient(player, repPayload(profile, result, interval, false))
+			-- Sync right away on a level up (Throw Power changed); otherwise every few reps
+			if result.LevelsGained > 0 or session.Reps % GameConfig.PullUp.SyncEveryReps == 0 then
+				PlayerStateService.Sync(player)
+			end
+		end
+
+		-- Offer a Bonus Rep pop-up every BonusRepIntervalMin..Max seconds
+		if session.BonusId ~= 0 and now > session.BonusExpiresAt then
+			session.BonusId = 0 -- missed it
+		end
+		if session.BonusId == 0 and now >= session.NextBonusAt then
+			bonusIdCounter += 1
+			session.BonusId = bonusIdCounter
+			session.BonusExpiresAt = now + GameConfig.Training.BonusRepWindow
+			session.NextBonusAt = now + nextBonusDelay()
+			Remotes.GetEvent("TrainingBonus"):FireClient(player, {
+				Id = session.BonusId,
+				Window = GameConfig.Training.BonusRepWindow,
+				Multiplier = GameConfig.Training.BonusRepMultiplier,
+			})
+		end
+	end
+end
+
+local function claimBonusRep(player: Player, bonusId: any)
+	local session = training[player]
+	if not session or type(bonusId) ~= "number" then
+		return
+	end
+	local now = os.clock()
+	-- Must be the offer currently open, still inside its window (small latency allowance),
+	-- and respect the per-player cooldown.
+	if
+		session.BonusId == 0
+		or bonusId ~= session.BonusId
+		or now > session.BonusExpiresAt + 0.3
+		or now - session.LastBonusAt < GameConfig.Training.BonusRepServerCooldown
+	then
+		return
+	end
 	local profile = PlayerStateService.GetProfile(player)
 	if not profile then
 		return
 	end
+	session.BonusId = 0
+	session.LastBonusAt = now
 
-	local gained = ProgressionLogic.ApplyPullUpRep(profile)
-	local char = player.Character
-	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	if hum then
-		hum.Jump = true
-	end
-	CharacterAnimator.PlayPullUpAnimation(char)
-
-	PlayerStateService.Toast(
-		player,
-		`+{gained} Throw Power! (💪 {ProgressionLogic.GetEffectiveThrowPower(profile)})`,
-		"power"
-	)
+	local result = ProgressionLogic.ApplyPullUpRep(profile, GameConfig.Training.BonusRepMultiplier)
+	local interval = ProgressionLogic.GetPullUpRepInterval(profile)
+	Remotes.GetEvent("TrainingRep"):FireClient(player, repPayload(profile, result, interval, true))
 	PlayerStateService.Sync(player)
+end
+
+function PlotService.IsTraining(player: Player): boolean
+	return training[player] ~= nil
+end
+
+function PlotService.StopTraining(player: Player)
+	stopTraining(player, "external")
 end
 
 local function collectPlotCash(player: Player, plot: Model?)
@@ -261,12 +521,14 @@ local function wirePlotInteractions(plot: Model)
 			prompt = Instance.new("ProximityPrompt")
 			prompt.Parent = bar
 		end
-		prompt.ActionText = "Train Pull-Up (+Power)"
+		prompt.ActionText = "Start Training"
 		prompt.ObjectText = "Pull-Up Bar"
+		prompt.KeyboardKeyCode = Enum.KeyCode.E
 		prompt.HoldDuration = 0
 		prompt.MaxActivationDistance = 14
+		prompt.RequiresLineOfSight = false
 		prompt.Triggered:Connect(function(triggerPlayer: Player)
-			performPullUpRep(triggerPlayer)
+			toggleTraining(triggerPlayer, plot, bar)
 		end)
 	end
 
@@ -334,15 +596,7 @@ local function wirePlotInteractions(plot: Model)
 		prompt.HoldDuration = 0
 		prompt.MaxActivationDistance = 12
 		prompt.Triggered:Connect(function(triggerPlayer: Player)
-			local profile = PlayerStateService.GetProfile(triggerPlayer)
-			if not profile then
-				return
-			end
-			local ok, msg = ProgressionLogic.PurchaseSlotExpansion(profile)
-			PlayerStateService.Toast(triggerPlayer, msg, if ok then "success" else "warn")
-			if ok then
-				PlayerStateService.Sync(triggerPlayer)
-			end
+			PlayerStateService.Purchase(triggerPlayer, "slot_expansion", 1)
 		end)
 	end
 
@@ -386,15 +640,7 @@ local function wireJellyShop()
 		prompt.ObjectText = "Jelly Shop"
 		prompt.HoldDuration = 0
 		prompt.Triggered:Connect(function(player: Player)
-			local profile = PlayerStateService.GetProfile(player)
-			if not profile then
-				return
-			end
-			local ok, msg = ProgressionLogic.PurchasePowerUpgrade(profile)
-			PlayerStateService.Toast(player, msg, if ok then "success" else "warn")
-			if ok then
-				PlayerStateService.Sync(player)
-			end
+			PlayerStateService.Purchase(player, "power_upgrade", 1)
 		end)
 	end
 end
@@ -473,6 +719,7 @@ local function teleportPlayer(player: Player, target: string)
 	if not char then
 		return
 	end
+	stopTraining(player, "teleport") -- un-anchor before moving
 	if target == "ThrowLine" then
 		local plotId = (player:GetAttribute("PlotId") :: number?) or 3
 		local xOffset = (plotId - 3) * 8
@@ -507,8 +754,20 @@ function PlotService.Init()
 		end
 	end)
 
-	Remotes.GetEvent("RequestTrainRep").OnServerEvent:Connect(function(player: Player)
-		performPullUpRep(player)
+	Remotes.GetEvent("RequestStopTraining").OnServerEvent:Connect(function(player: Player)
+		stopTraining(player, "client")
+	end)
+
+	Remotes.GetEvent("RequestBonusRep").OnServerEvent:Connect(function(player: Player, payload: any)
+		if type(payload) == "table" then
+			claimBonusRep(player, payload.Id)
+		end
+	end)
+
+	Players.PlayerRemoving:Connect(function(player: Player)
+		training[player] = nil
+		toggleCooldowns[player] = nil
+		collectCooldowns[player] = nil
 	end)
 
 	Remotes.GetEvent("RequestCollect").OnServerEvent:Connect(function(player: Player)
@@ -543,6 +802,7 @@ function PlotService.Init()
 
 	local accum = 0
 	RunService.Heartbeat:Connect(function(dt: number)
+		stepTraining()
 		accum += dt
 		for _, slotsMap in plotSlotModels do
 			for _, slimeModel in slotsMap do

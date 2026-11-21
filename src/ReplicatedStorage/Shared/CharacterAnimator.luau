@@ -15,6 +15,8 @@
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local SlimeFactory = require(script.Parent:WaitForChild("SlimeFactory"))
+local GameConfig = require(script.Parent:WaitForChild("GameConfig"))
+local PullUpMotion = require(script.Parent:WaitForChild("PullUpMotion"))
 
 -- Temporary diagnostics for the "pitch does nothing" bug. Set to false once confirmed fixed.
 local DEBUG = true
@@ -35,6 +37,7 @@ local activeAimBait: Model? = nil
 local activeAimConn: RBXScriptConnection? = nil
 local activeAimRig: RigMotors? = nil
 local isThrowing = false
+local isPullingUp = false -- true while the pull-up loop owns the joints
 local activeThrowCleanup: (() -> ())? = nil
 
 local activeCarryModel: Model? = nil
@@ -300,7 +303,7 @@ function CharacterAnimator.IsThrowing(): boolean
 end
 
 function CharacterAnimator.StartAimPose(character: Model?)
-	if not character or isThrowing then
+	if not character or isThrowing or isPullingUp then
 		return
 	end
 	if activeAimBait and activeAimBait.Parent then
@@ -697,7 +700,7 @@ function CharacterAnimator.StartCarrySlime(character: Model?, slimeId: string, m
 
 	activeCarryConn = RunService.Stepped:Connect(function()
 		-- Never fight the pitch for the shoulder joints
-		if not character.Parent or not activeCarryModel or isThrowing then
+		if not character.Parent or not activeCarryModel or isThrowing or isPullingUp then
 			return
 		end
 		local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
@@ -727,33 +730,183 @@ function CharacterAnimator.StopCarrySlime()
 	end
 end
 
-function CharacterAnimator.PlayPullUpAnimation(character: Model?)
-	if not character then
+-- ============================================================================
+-- LOOPING PULL-UP (client-side only; the server holds the character under the bar
+-- and owns the rep cadence). One full cycle = one rep = `getInterval()` seconds.
+-- The exaggerated motion curve + pose live in PullUpMotion (pure, unit-tested).
+-- Peak (chin over bar) is phase 0.5; the server pays the first rep at half an interval,
+-- and CharacterAnimator.SyncPullUpRep() nudges the phase so every paid rep lands on the peak.
+-- ============================================================================
+local PULLUP_RENDER_STEP = "CharacterAnimatorPullUp"
+local PULLUP_SYNC_STRENGTH = 0.35 -- fraction of the phase error corrected per paid rep
+local pullUpStop: (() -> ())? = nil -- soft stop: ease down, then release joints
+local pullUpKill: (() -> ())? = nil -- hard stop: release joints immediately
+local pullUpSync: (() -> ())? = nil -- phase-lock to a server rep
+
+local function applyPullUpPose(rig: RigMotors, p: PullUpMotion.Pose)
+	if rig.IsR15 then
+		-- Body rises/leans/rolls from the pelvis; arms fold at the elbows to "pull" the body up
+		setMotorPose(rig.Root, CFrame.new(0, p.Rise, 0) * CFrame.Angles(math.rad(p.Lean), 0, math.rad(p.Roll)))
+		setMotorPose(rig.Waist, CFrame.Angles(math.rad(p.Lean * 0.5), 0, 0))
+		setMotorPose(rig.Neck, CFrame.Angles(math.rad(p.Neck), 0, 0))
+		setMotorPose(rig.RightShoulder, CFrame.Angles(math.rad(p.ShoulderR15), 0, math.rad(-8)))
+		setMotorPose(rig.LeftShoulder, CFrame.Angles(math.rad(p.ShoulderR15), 0, math.rad(8)))
+		setMotorPose(rig.RightElbow, CFrame.Angles(math.rad(p.Elbow), 0, 0))
+		setMotorPose(rig.LeftElbow, CFrame.Angles(math.rad(p.Elbow), 0, 0))
+		setMotorPose(rig.LeftHip, CFrame.Angles(math.rad(p.HipL), 0, 0))
+		setMotorPose(rig.RightHip, CFrame.Angles(math.rad(p.HipR), 0, 0))
+		setMotorPose(rig.LeftKnee, CFrame.Angles(math.rad(-p.KneeL), 0, 0))
+		setMotorPose(rig.RightKnee, CFrame.Angles(math.rad(-p.KneeR), 0, 0))
+	else
+		-- R6 RootJoint axes are rotated (local Z = up, local Y = forward); no elbows/knees, so the
+		-- shoulders swing further and the hips take the knee tuck.
+		setMotorPose(
+			rig.Root,
+			CFrame.new(0, 0, p.Rise) * CFrame.Angles(math.rad(-p.Lean), math.rad(p.Roll), 0)
+		)
+		setMotorPose(rig.Neck, CFrame.Angles(math.rad(-p.Neck), 0, 0))
+		setMotorPose(rig.RightShoulder, CFrame.Angles(0, 0, math.rad(p.ShoulderR6)))
+		setMotorPose(rig.LeftShoulder, CFrame.Angles(0, 0, math.rad(-p.ShoulderR6)))
+		setMotorPose(rig.LeftHip, CFrame.Angles(0, 0, math.rad(-(p.HipL + 0.5 * p.KneeL))))
+		setMotorPose(rig.RightHip, CFrame.Angles(0, 0, math.rad(p.HipR + 0.5 * p.KneeR)))
+	end
+end
+
+-- Call when the server pays a rep (TrainingRep): pulls the animation phase toward the peak.
+function CharacterAnimator.SyncPullUpRep()
+	if pullUpSync then
+		pullUpSync()
+	end
+end
+
+function CharacterAnimator.IsPullUpLooping(): boolean
+	return pullUpStop ~= nil
+end
+
+function CharacterAnimator.StartPullUpLoop(character: Model?, getInterval: () -> number)
+	if pullUpKill then
+		pullUpKill()
+	end
+	if not character or not RunService:IsClient() then
 		return
 	end
-	local rig = getRigMotors(character)
-	local startClock = os.clock()
-	local dur = 0.38
 
-	local conn: RBXScriptConnection? = nil
-	conn = RunService.Stepped:Connect(function()
-		local t = os.clock() - startClock
-		local a = math.sin(math.clamp(t / dur, 0, 1) * math.pi)
-		local angle = math.rad(155 * a)
-		if rig.IsR15 then
-			setMotorPose(rig.RightShoulder, CFrame.Angles(angle, 0, 0))
-			setMotorPose(rig.LeftShoulder, CFrame.Angles(angle, 0, 0))
-		else
-			setMotorPose(rig.RightShoulder, CFrame.Angles(0, 0, angle))
-			setMotorPose(rig.LeftShoulder, CFrame.Angles(0, 0, -angle))
-		end
-		if t >= dur then
-			if conn then
-				conn:Disconnect()
+	-- Yield the arms/legs: no aim pose or carried slime while hanging on the bar
+	CharacterAnimator.StopAimPose()
+	CharacterAnimator.StopCarrySlime()
+
+	local rig = getRigMotors(character)
+	local pausedTracks = pauseActiveAnimationTracks(character)
+	local phase = 0
+	local stopping = false
+	local stopBlend = 1
+	local lastClock = os.clock()
+
+	if DEBUG then
+		local missing = {}
+		local r = rig :: any
+		for _, key in JOINT_KEYS do
+			if r[key] == nil then
+				table.insert(missing, key)
 			end
-			resetRigMotors(rig)
 		end
+		dprint(
+			`pull-up start | rig={if rig.IsR15 then "R15" else "R6"} | missing=[{table.concat(missing, ", ")}]`,
+			string.format("| interval=%.2fs", getInterval())
+		)
+	end
+
+	local animCfg = GameConfig.PullUp.Anim
+	local startClock = os.clock()
+	local debugReported = false
+	local stepConn: RBXScriptConnection? = nil
+	local repIndex = 0
+	local currentPose = PullUpMotion.Pose(0, 0, 0, 0, animCfg)
+
+	local stopped = false
+	local function stop()
+		if stopped then
+			return
+		end
+		stopped = true
+		if stepConn then
+			stepConn:Disconnect()
+			stepConn = nil
+		end
+		RunService:UnbindFromRenderStep(PULLUP_RENDER_STEP)
+		resetRigMotors(rig)
+		resumeAnimationTracks(pausedTracks)
+		pullUpStop = nil
+		pullUpKill = nil
+		pullUpSync = nil
+		isPullingUp = false
+		dprint("pull-up stopped")
+	end
+	pullUpKill = stop
+	isPullingUp = true
+
+	-- Advance the cycle and pose the joints. Runs in Stepped (before physics, like the working
+	-- pitch); the render step below only re-applies the same pose so nothing else can win.
+	stepConn = RunService.Stepped:Connect(function()
+		local now = os.clock()
+		local dt = math.min(now - lastClock, 0.1)
+		lastClock = now
+		if not character.Parent then
+			stop()
+			return
+		end
+
+		local interval = math.max(0.1, getInterval())
+		local nextPhase = phase + dt / interval
+		if nextPhase >= 1 then
+			repIndex += 1 -- alternates the body roll each rep
+		end
+		phase = nextPhase % 1
+
+		if stopping then
+			-- Ease back down to the hang/rest over ~0.2s before handing joints back
+			stopBlend = math.max(0, stopBlend - dt / 0.2)
+			if stopBlend <= 0 then
+				stop()
+				return
+			end
+		end
+		local scale = PullUpMotion.Intensity(interval) * stopBlend
+		currentPose = PullUpMotion.Pose(phase, scale, repIndex, now, animCfg)
+		applyPullUpPose(rig, currentPose)
 	end)
+
+	RunService:BindToRenderStep(PULLUP_RENDER_STEP, Enum.RenderPriority.Last.Value, function()
+		if stopped then
+			return
+		end
+		if DEBUG and not debugReported and os.clock() - startClock >= 0.5 then
+			-- Checked before re-applying, so this reflects what physics actually did with our C0
+			debugReported = true
+			dprint(
+				string.format("pull-up t=0.5s lift=%.2f |", currentPose.Lift),
+				describeJoint("Root", rig.Root),
+				"|",
+				describeJoint("RightShoulder", rig.RightShoulder)
+			)
+		end
+		applyPullUpPose(rig, currentPose)
+	end)
+
+	pullUpStop = function()
+		stopping = true
+	end
+	pullUpSync = function()
+		if not stopping then
+			phase = (phase + PullUpMotion.PhaseDelta(phase, PullUpMotion.PEAK) * PULLUP_SYNC_STRENGTH) % 1
+		end
+	end
+end
+
+function CharacterAnimator.StopPullUpLoop()
+	if pullUpStop then
+		pullUpStop()
+	end
 end
 
 return CharacterAnimator

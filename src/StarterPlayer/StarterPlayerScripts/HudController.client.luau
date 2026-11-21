@@ -29,13 +29,36 @@ local UiKit = require(Shared:WaitForChild("UiKit"))
 
 local stateSync = Remotes.GetEvent("PlayerStateSync")
 local toastNotify = Remotes.GetEvent("ToastNotify")
-local requestUpgrade = Remotes.GetEvent("RequestUpgrade")
+local requestPurchase = Remotes.GetEvent("RequestPurchase")
 local requestPlaceBest = Remotes.GetEvent("RequestPlaceBestSlimes")
 local requestPlaceOnSlot = Remotes.GetEvent("RequestPlaceOnSlot")
-local requestClaimFreeGift = Remotes.GetEvent("RequestClaimFreeGift")
-local requestHatchEgg = Remotes.GetEvent("RequestHatchEgg")
-local requestBuyBoost = Remotes.GetEvent("RequestBuyBoost")
 local requestEquipTrail = Remotes.GetEvent("RequestEquipTrail")
+
+-- ============================================================================
+-- SHOP BINDING (logic lives in GameConfig.ShopCatalog + ProgressionLogic.GetShopListing/Purchase)
+-- UI code only: (1) fires buyShopItem(itemId, quantity) and (2) registers labels with
+-- bindShopLabel so refreshShopLabels() can fill in names/prices/states from the listing.
+-- ============================================================================
+local function buyShopItem(itemId: string, quantity: (number | string)?)
+	requestPurchase:FireServer({ ItemId = itemId, Quantity = quantity or 1 })
+end
+
+type ShopLabelBinding = { Label: TextLabel, ItemId: string, OptionIndex: number, Style: "Row" | "Option" }
+local shopLabelBindings: { ShopLabelBinding } = {}
+
+local function bindShopLabel(label: TextLabel?, itemId: string, optionIndex: number, style: "Row" | "Option")
+	if label then
+		table.insert(shopLabelBindings, { Label = label, ItemId = itemId, OptionIndex = optionIndex, Style = style })
+	end
+end
+
+-- Catalog id for each egg (so egg cards built from GameConfig.ShopEggs know what to buy)
+local eggCatalogId: { [string]: string } = {}
+for _, item in GameConfig.ShopCatalog do
+	if item.Action == "Egg" and item.Args.EggId then
+		eggCatalogId[item.Args.EggId] = item.Id
+	end
+end
 
 local currentState: any = {
 	Cash = 0,
@@ -520,33 +543,37 @@ for _, eggDef in GameConfig.ShopEggs do
 		addStroke(inc, Color3.fromRGB(15, 18, 25), 1.5)
 	end
 
-	UiKit.CreateBevelButton({
+	local eggItemId = eggCatalogId[eggDef.Id] or eggDef.Id
+
+	local _, _, buy1Lbl = UiKit.CreateBevelButton({
 		Name = "Buy1Btn",
 		Parent = eggCard,
 		Position = UDim2.new(0.5, -172, 1, -44),
 		Size = UDim2.fromOffset(158, 36),
 		Color = Color3.fromRGB(85, 235, 75),
 		CornerRadius = 9,
-		Text = `Buy x1 ($${GameConfig.FormatNumber(eggDef.Buy1Cost)})`,
+		Text = "Buy x1",
 		TextSize = 17,
 		OnClick = function()
-			requestHatchEgg:FireServer({ EggId = eggDef.Id, Count = 1 })
+			buyShopItem(eggItemId, 1)
 		end,
 	})
+	bindShopLabel(buy1Lbl, eggItemId, 1, "Option")
 
-	UiKit.CreateBevelButton({
+	local _, _, buy3Lbl = UiKit.CreateBevelButton({
 		Name = "Buy3Btn",
 		Parent = eggCard,
 		Position = UDim2.new(0.5, 14, 1, -44),
 		Size = UDim2.fromOffset(158, 36),
 		Color = Color3.fromRGB(65, 215, 110),
 		CornerRadius = 9,
-		Text = `Buy x3 ($${GameConfig.FormatNumber(eggDef.Buy3Cost)})`,
+		Text = "Buy x3",
 		TextSize = 17,
 		OnClick = function()
-			requestHatchEgg:FireServer({ EggId = eggDef.Id, Count = 3 })
+			buyShopItem(eggItemId, 3)
 		end,
 	})
+	bindShopLabel(buy3Lbl, eggItemId, 2, "Option")
 end
 
 -- Upgrades & Boosts Row in Shop
@@ -557,61 +584,32 @@ upgradesCard.Parent = shopScroll
 addCorner(upgradesCard, 12)
 addStroke(upgradesCard, Color3.fromRGB(18, 20, 28), 2.2, Enum.ApplyStrokeMode.Border)
 
-local _, _, shopBuyPowerLbl = UiKit.CreateBevelButton({
-	Name = "BuyPowerBtn",
-	Parent = upgradesCard,
-	Position = UDim2.fromOffset(12, 12),
-	Size = UDim2.new(0.5, -18, 0, 40),
-	Color = Color3.fromRGB(235, 150, 45),
-	CornerRadius = 9,
-	Text = "⚡ Upgrade Power — $25",
-	TextSize = 16,
-	OnClick = function()
-		requestUpgrade:FireServer({ UpgradeType = "ThrowPower" })
-	end,
-})
-
-local _, _, shopBuyPullUpLbl = UiKit.CreateBevelButton({
-	Name = "BuyPullUpBtn",
-	Parent = upgradesCard,
-	Position = UDim2.new(0.5, 6, 0, 12),
-	Size = UDim2.new(0.5, -18, 0, 40),
-	Color = Color3.fromRGB(55, 155, 240),
-	CornerRadius = 9,
-	Text = "💪 Upgrade Pull-Up Bar — $75",
-	TextSize = 16,
-	OnClick = function()
-		requestUpgrade:FireServer({ UpgradeType = "PullUpTier" })
-	end,
-})
-
-local _, _, shopBuy2xCashLbl = UiKit.CreateBevelButton({
-	Name = "Buy2xCashBtn",
-	Parent = upgradesCard,
-	Position = UDim2.fromOffset(12, 64),
-	Size = UDim2.new(0.5, -18, 0, 40),
-	Color = Color3.fromRGB(45, 185, 235),
-	CornerRadius = 9,
-	Text = "💵 x2 Cash Boost — $500",
-	TextSize = 16,
-	OnClick = function()
-		requestBuyBoost:FireServer({ BoostId = "double_cash" })
-	end,
-})
-
-local _, _, shopBuy2xPowerLbl = UiKit.CreateBevelButton({
-	Name = "Buy2xPowerBtn",
-	Parent = upgradesCard,
-	Position = UDim2.new(0.5, 6, 0, 64),
-	Size = UDim2.new(0.5, -18, 0, 40),
-	Color = Color3.fromRGB(165, 95, 245),
-	CornerRadius = 9,
-	Text = "💪 x2 Pull-Up XP — $750",
-	TextSize = 16,
-	OnClick = function()
-		requestBuyBoost:FireServer({ BoostId = "double_power" })
-	end,
-})
+-- Upgrade/boost buttons: layout is UI's choice; which item each button buys is just a catalog id.
+local UPGRADE_ROW_LAYOUT: { { ItemId: string, Position: UDim2 } } = {
+	{ ItemId = "power_upgrade", Position = UDim2.fromOffset(12, 12) },
+	{ ItemId = "pullup_tier", Position = UDim2.new(0.5, 6, 0, 12) },
+	{ ItemId = "boost_double_cash", Position = UDim2.fromOffset(12, 64) },
+	{ ItemId = "boost_double_power", Position = UDim2.new(0.5, 6, 0, 64) },
+}
+for _, slot in UPGRADE_ROW_LAYOUT do
+	local item = GameConfig.ShopCatalogById[slot.ItemId]
+	if item then
+		local _, _, lbl = UiKit.CreateBevelButton({
+			Name = `Buy_{item.Id}`,
+			Parent = upgradesCard,
+			Position = slot.Position,
+			Size = UDim2.new(0.5, -18, 0, 40),
+			Color = SlimeFactory.ToColor3(item.Color),
+			CornerRadius = 9,
+			Text = item.Icon,
+			TextSize = 16,
+			OnClick = function()
+				buyShopItem(item.Id, 1)
+			end,
+		})
+		bindShopLabel(lbl, item.Id, 1, "Row")
+	end
+end
 
 -- Free Slime Claim Card with 3D ViewportFrame preview (Clip 2 00:15)
 local freeGiftCard = Instance.new("Frame")
@@ -655,9 +653,33 @@ local _, _, freeGiftClaimLbl = UiKit.CreateBevelButton({
 	Text = "CLAIM!",
 	TextSize = 24,
 	OnClick = function()
-		requestClaimFreeGift:FireServer()
+		buyShopItem("free_gift", 1)
 	end,
 })
+bindShopLabel(freeGiftClaimLbl, "free_gift", 1, "Option")
+
+-- Fill every bound shop label from the shared listing (computed locally from synced state)
+local function refreshShopLabels()
+	local byId: { [string]: ProgressionLogic.ShopListingEntry } = {}
+	for _, entry in ProgressionLogic.GetShopListing(currentState) do
+		byId[entry.Id] = entry
+	end
+	for _, b in shopLabelBindings do
+		local entry = byId[b.ItemId]
+		if entry then
+			local opt = entry.Options[b.OptionIndex]
+			local soldOut = entry.State == "Owned" or entry.State == "Maxed" or entry.State == "Claimed"
+			if b.Style == "Row" then
+				b.Label.Text = if soldOut
+					then `{entry.Icon} {entry.Title} ({entry.PriceText})`
+					else `{entry.Icon} {entry.Title} — {entry.PriceText}`
+			else
+				b.Label.Text = if soldOut or not opt then entry.PriceText else opt.Label
+			end
+			b.Label.TextTransparency = if opt and not opt.CanAfford then 0.35 else 0
+		end
+	end
+end
 
 -- ============================================================================
 -- 7. SLIMES BACKPACK MODAL ("Slimes" button on Right)
@@ -1117,30 +1139,7 @@ local function refreshAllUi()
 	powerRowLabel.Text = `💪 {GameConfig.FormatNumber(currentState.EffectiveThrowPower or 5)}`
 	cashRowLabel.Text = `💵 $${GameConfig.FormatNumber(currentState.Cash or 0)}`
 
-	if shopBuyPowerLbl then
-		shopBuyPowerLbl.Text = `⚡ Upgrade Power (Lv.{currentState.PowerUpgradeLevel or 1}) — $${GameConfig.FormatNumber(currentState.NextPowerCost or 25)}`
-	end
-
-	local tierIdx = currentState.PullUpTier or 1
-	local nextTier = GameConfig.PullUpTiers[tierIdx + 1]
-	if shopBuyPullUpLbl then
-		if nextTier then
-			shopBuyPullUpLbl.Text = `💪 {nextTier.Name} (+{nextTier.XPPerRep}/rep) — $${GameConfig.FormatNumber(nextTier.Cost)}`
-		else
-			shopBuyPullUpLbl.Text = "💪 Pull-Up Bar: MAX TIER"
-		end
-	end
-
-	local boosts = currentState.OwnedBoosts or {}
-	if shopBuy2xCashLbl then
-		shopBuy2xCashLbl.Text = if boosts.double_cash then "💵 x2 Cash (OWNED)" else "💵 x2 Cash Boost — $500"
-	end
-	if shopBuy2xPowerLbl then
-		shopBuy2xPowerLbl.Text = if boosts.double_power then "💪 x2 Pull-Up XP (OWNED)" else "💪 x2 Pull-Up XP — $750"
-	end
-	if freeGiftClaimLbl then
-		freeGiftClaimLbl.Text = if currentState.ClaimedFreeGift then "CLAIMED" else "CLAIM!"
-	end
+	refreshShopLabels()
 
 	rebuildHotbar()
 	rebuildSlimeIndexModal()

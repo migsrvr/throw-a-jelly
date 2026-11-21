@@ -59,6 +59,15 @@ export type MeterSegmentDef = {
 	Color: RGB,
 	BonusPower: number,
 	LuckMultiplier: number,
+	IsPerfect: boolean?, -- top band: "PERFECT!" callout
+}
+
+export type BaitTierDef = {
+	Tier: number,
+	Name: string,
+	Cost: number,
+	LuckMultiplier: number, -- multiplies slime rarity & mutation luck on every throw
+	Color: RGB,
 }
 
 export type PullUpTierDef = {
@@ -66,6 +75,19 @@ export type PullUpTierDef = {
 	Name: string,
 	Cost: number,
 	XPPerRep: number,
+	SpeedMult: number, -- multiplies pull-up rep speed (see GameConfig.PullUp)
+}
+
+export type ShopAction = "PowerUpgrade" | "PullUpTier" | "BaitTier" | "SlotExpansion" | "Boost" | "Egg" | "FreeGift"
+
+export type ShopCatalogItem = {
+	Id: string,
+	Category: "Upgrade" | "Boost" | "Egg" | "Gift",
+	Action: ShopAction,
+	Args: { BoostId: string?, EggId: string? },
+	Icon: string,
+	Color: RGB,
+	PriceKind: "Cash", -- reserved for future "Robux" items
 }
 
 export type ShopEggItem = {
@@ -123,18 +145,55 @@ GameConfig.Slots = {
 	ExpansionCost = 5000,
 }
 
--- 9-Segment Vertical Throw Meter (bottom segment 1 = Red -> top segment 9 = Bright Green)
+-- 9-Segment Vertical Throw Meter (bottom segment 1 = Red -> top segment 9 = Bright Green).
+-- Bonus Throw Power runs 0-20; stopping in the top band is a "PERFECT!" (+20).
 GameConfig.MeterSegments = {
 	{ Index = 1, Color = { 235, 65, 55 }, BonusPower = 1, LuckMultiplier = 1.00 },
 	{ Index = 2, Color = { 245, 105, 50 }, BonusPower = 3, LuckMultiplier = 1.03 },
 	{ Index = 3, Color = { 250, 145, 50 }, BonusPower = 5, LuckMultiplier = 1.06 },
-	{ Index = 4, Color = { 255, 185, 55 }, BonusPower = 8, LuckMultiplier = 1.10 },
-	{ Index = 5, Color = { 245, 220, 60 }, BonusPower = 11, LuckMultiplier = 1.15 },
-	{ Index = 6, Color = { 205, 235, 65 }, BonusPower = 14, LuckMultiplier = 1.22 },
-	{ Index = 7, Color = { 160, 240, 75 }, BonusPower = 17, LuckMultiplier = 1.32 },
-	{ Index = 8, Color = { 115, 245, 85 }, BonusPower = 21, LuckMultiplier = 1.48 },
-	{ Index = 9, Color = { 70, 250, 105 }, BonusPower = 25, LuckMultiplier = 1.75 },
+	{ Index = 4, Color = { 255, 185, 55 }, BonusPower = 7, LuckMultiplier = 1.10 },
+	{ Index = 5, Color = { 245, 220, 60 }, BonusPower = 9, LuckMultiplier = 1.15 },
+	{ Index = 6, Color = { 205, 235, 65 }, BonusPower = 12, LuckMultiplier = 1.22 },
+	{ Index = 7, Color = { 160, 240, 75 }, BonusPower = 14, LuckMultiplier = 1.32 },
+	{ Index = 8, Color = { 115, 245, 85 }, BonusPower = 17, LuckMultiplier = 1.48 },
+	{ Index = 9, Color = { 70, 250, 105 }, BonusPower = 20, LuckMultiplier = 1.75, IsPerfect = true },
 } :: { MeterSegmentDef }
+
+-- Live flight luck: distance down the lane x meter band luck x bait quality.
+-- Shared by the server (authoritative reward roll) and the client (live "1.XXx LUCK" ticker).
+GameConfig.FlightLuck = {
+	StudsPerExtraLuck = 350, -- +1.00x luck for every 350 studs of distance
+}
+
+function GameConfig.ComputeFlightLuck(distanceStuds: number, meterLuck: number, baitLuck: number): number
+	local distMult = 1.0 + math.max(0, distanceStuds) / GameConfig.FlightLuck.StudsPerExtraLuck
+	return distMult * math.max(1.0, meterLuck) * math.max(1.0, baitLuck)
+end
+
+-- Jelly Bait quality tiers (bought in the Shop): multiplies rarity & mutation luck inside the zone you reach.
+GameConfig.BaitTiers = {
+	{ Tier = 1, Name = "Carrot Jelly", Cost = 0, LuckMultiplier = 1.00, Color = { 255, 125, 40 } },
+	{ Tier = 2, Name = "Berry Jelly", Cost = 150, LuckMultiplier = 1.35, Color = { 200, 70, 160 } },
+	{ Tier = 3, Name = "Crystal Honey", Cost = 900, LuckMultiplier = 1.85, Color = { 255, 205, 70 } },
+	{ Tier = 4, Name = "Magma Tart", Cost = 4500, LuckMultiplier = 2.60, Color = { 255, 95, 45 } },
+	{ Tier = 5, Name = "Starlight Cake", Cost = 22000, LuckMultiplier = 4.00, Color = { 170, 150, 255 } },
+} :: { BaitTierDef }
+
+-- Strength levels: pull-up reps give Training XP; every level up gives +PowerPerLevel Throw Power.
+GameConfig.Training = {
+	PowerPerLevel = 5,
+	BonusRepMultiplier = 3, -- XP multiplier for clicking a Bonus Rep pop-up
+	BonusRepIntervalMin = 4.0, -- seconds between Bonus Rep offers while training
+	BonusRepIntervalMax = 6.0,
+	BonusRepWindow = 2.5, -- seconds a Bonus Rep offer stays clickable
+	BonusRepServerCooldown = 3.5, -- minimum seconds between two accepted Bonus Reps
+}
+
+-- XP needed to go from `level` to `level + 1` (Lv1->2 = 10, Lv5->6 = 88, Lv10->11 = 223, Lv20->21 = 570).
+function GameConfig.GetXPRequiredForLevel(level: number): number
+	local lvl = math.max(1, math.floor(level))
+	return math.floor(10 * (lvl ^ 1.35))
+end
 
 function GameConfig.EvaluateMeterRatio(ratio: number): MeterSegmentDef
 	local clamped = math.clamp(ratio, 0, 1)
@@ -544,12 +603,57 @@ for _, slime in GameConfig.Slimes do
 end
 
 GameConfig.PullUpTiers = {
-	{ Tier = 1, Name = "PULL-UP BAR", Cost = 0, XPPerRep = 2 },
-	{ Tier = 2, Name = "IRON BAR", Cost = 75, XPPerRep = 8 },
-	{ Tier = 3, Name = "CRYSTAL BAR", Cost = 450, XPPerRep = 32 },
-	{ Tier = 4, Name = "MAGMA BAR", Cost = 2500, XPPerRep = 140 },
-	{ Tier = 5, Name = "STARLIGHT BAR", Cost = 15000, XPPerRep = 600 },
+	{ Tier = 1, Name = "PULL-UP BAR", Cost = 0, XPPerRep = 2, SpeedMult = 1.0 },
+	{ Tier = 2, Name = "IRON BAR", Cost = 75, XPPerRep = 8, SpeedMult = 1.15 },
+	{ Tier = 3, Name = "CRYSTAL BAR", Cost = 450, XPPerRep = 32, SpeedMult = 1.3 },
+	{ Tier = 4, Name = "MAGMA BAR", Cost = 2500, XPPerRep = 140, SpeedMult = 1.5 },
+	{ Tier = 5, Name = "STARLIGHT BAR", Cost = 15000, XPPerRep = 600, SpeedMult = 1.75 },
 } :: { PullUpTierDef }
+
+-- Pull-up loop tuning. Rep time shrinks with strength (BaseThrowPower) and bar tier SpeedMult:
+--   interval = clamp(BaseRepSeconds / (SpeedMult * (1 + StrengthLogScale * log10(1 + power / StrengthRef))),
+--                    MinRepSeconds, BaseRepSeconds)
+GameConfig.PullUp = {
+	BaseRepSeconds = 1.6,
+	MinRepSeconds = 0.35,
+	StrengthLogScale = 0.8,
+	StrengthRef = 5,
+	MaxTrainDistance = 16, -- studs from the bar before training auto-stops
+	SyncEveryReps = 5, -- full PlayerStateSync cadence while training (TrainingRep fires every rep)
+
+	-- Exaggerated rep motion (degrees / studs at full intensity; see PullUpMotion.luau)
+	Anim = {
+		Rise = 2.4, -- studs the body rises at the chin-over-bar peak
+		StretchDip = 0.15, -- fraction of Rise the body sinks below the hang in the anticipation stretch
+		Overshoot = 0.1, -- fraction of Rise the pull overshoots before settling into the hold
+		HoldFraction = 0.08, -- fraction of the cycle spent holding at the top
+		ShoulderHang = 175, -- arms straight overhead in the dead hang
+		ShoulderTopR15 = 105, -- R15 shoulder angle at the peak (elbows do the rest)
+		ShoulderTopR6 = 130, -- R6 has no elbows, so the shoulders swing further
+		ElbowTop = 150, -- R15 elbow fold at the peak
+		LeanBack = 10, -- torso lean back at the peak
+		NeckTilt = 25, -- chin-up head tilt at the peak
+		Roll = 6, -- body roll at the peak, alternating left/right each rep
+		KneeTuck = 70, -- knee tuck at the peak
+		LegSwing = 22, -- pendulum leg swing on the way down
+	},
+
+	-- Front camera + per-rep shake (TrainingController.client.luau)
+	Camera = {
+		Distance = 10, -- studs in front of the character
+		HeightOffset = 0.5, -- camera height above the HumanoidRootPart (low angle)
+		FocusHeight = 1.8, -- look-at point above the HumanoidRootPart (face / bar)
+		MinDistance = 4, -- closest the occlusion pull-in may bring the camera
+		FieldOfView = 70,
+		FovPunch = 6, -- degrees the FOV dips at each rep peak
+		FovPunchTime = 0.25, -- seconds for the FOV punch to recover
+		ShakeTrauma = 0.55, -- trauma added per rep (x intensity), capped at 1
+		ShakeDecay = 3.5, -- trauma lost per second
+		ShakePosition = 0.35, -- studs of positional shake at full trauma
+		ShakeRotation = 1.8, -- degrees of rotational shake at full trauma
+		ShakeFrequency = 18, -- noise speed
+	},
+}
 
 GameConfig.ShopEggs = {
 	{
@@ -614,6 +718,29 @@ GameConfig.FreeGift = {
 	Title = "Free Slime!",
 	Subtitle = "Claim your free Emerald Sakura Slime!",
 }
+
+--[[
+	Shop catalog: the single list of everything purchasable. Prices/names are NOT stored here;
+	they are read from the tables above (PullUpTiers, ShopEggs, ShopBoosts, Slots, GetPowerUpgradeCost)
+	by ProgressionLogic.GetShopListing, so each number lives in exactly one place.
+	Adding an item = add a row here (+ its data in the table it points to). See docs/shop-catalog.md.
+]]
+GameConfig.ShopCatalog = {
+	{ Id = "power_upgrade", Category = "Upgrade", Action = "PowerUpgrade", Args = {}, Icon = "⚡", Color = { 235, 150, 45 }, PriceKind = "Cash" },
+	{ Id = "pullup_tier", Category = "Upgrade", Action = "PullUpTier", Args = {}, Icon = "💪", Color = { 55, 155, 240 }, PriceKind = "Cash" },
+	{ Id = "bait_tier", Category = "Upgrade", Action = "BaitTier", Args = {}, Icon = "🥕", Color = { 255, 125, 40 }, PriceKind = "Cash" },
+	{ Id = "slot_expansion", Category = "Upgrade", Action = "SlotExpansion", Args = {}, Icon = "🧺", Color = { 95, 200, 120 }, PriceKind = "Cash" },
+	{ Id = "boost_double_cash", Category = "Boost", Action = "Boost", Args = { BoostId = "double_cash" }, Icon = "💵", Color = { 45, 185, 235 }, PriceKind = "Cash" },
+	{ Id = "boost_double_power", Category = "Boost", Action = "Boost", Args = { BoostId = "double_power" }, Icon = "💪", Color = { 165, 95, 245 }, PriceKind = "Cash" },
+	{ Id = "egg_enchanted", Category = "Egg", Action = "Egg", Args = { EggId = "enchanted_egg" }, Icon = "🥚", Color = { 175, 110, 255 }, PriceKind = "Cash" },
+	{ Id = "egg_rainbow", Category = "Egg", Action = "Egg", Args = { EggId = "rainbow_egg" }, Icon = "🌈", Color = { 255, 120, 200 }, PriceKind = "Cash" },
+	{ Id = "free_gift", Category = "Gift", Action = "FreeGift", Args = {}, Icon = "🎁", Color = { 255, 205, 55 }, PriceKind = "Cash" },
+} :: { ShopCatalogItem }
+
+GameConfig.ShopCatalogById = {} :: { [string]: ShopCatalogItem }
+for _, item in GameConfig.ShopCatalog do
+	GameConfig.ShopCatalogById[item.Id] = item
+end
 
 function GameConfig.GetPowerUpgradeCost(currentLevel: number): number
 	local lvl = math.max(1, math.floor(currentLevel))

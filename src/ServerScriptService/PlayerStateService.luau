@@ -92,6 +92,11 @@ function PlayerStateService.Sync(player: Player)
 		EffectiveThrowPower = effPower,
 		NextPowerCost = GameConfig.GetPowerUpgradeCost(profile.PowerUpgradeLevel),
 		PullUpTier = profile.PullUpTier,
+		PullUpRepInterval = ProgressionLogic.GetPullUpRepInterval(profile),
+		StrengthLevel = profile.StrengthLevel,
+		TrainingXP = profile.TrainingXP,
+		TrainingXPRequired = GameConfig.GetXPRequiredForLevel(profile.StrengthLevel),
+		BaitTier = profile.BaitTier,
 		MaxSlimes = profile.MaxSlimes,
 		BestDistance = profile.BestDistance,
 		EquippedSlimeId = profile.EquippedSlimeId,
@@ -121,6 +126,29 @@ function PlayerStateService.Toast(player: Player, message: string, kind: string?
 	})
 end
 
+local PURCHASE_COOLDOWN = 0.15
+local lastPurchaseAt: { [Player]: number } = {}
+
+-- Shared purchase path: rate limit -> ProgressionLogic.Purchase -> toast -> sync.
+function PlayerStateService.Purchase(player: Player, itemId: string, quantity: ProgressionLogic.ShopQuantity?): boolean
+	local profile = profiles[player]
+	if not profile then
+		return false
+	end
+	local now = os.clock()
+	if lastPurchaseAt[player] and now - lastPurchaseAt[player] < PURCHASE_COOLDOWN then
+		return false
+	end
+	lastPurchaseAt[player] = now
+
+	local ok, msg = ProgressionLogic.Purchase(profile, itemId, quantity)
+	PlayerStateService.Toast(player, msg, if ok then "success" else "warn")
+	if ok then
+		PlayerStateService.Sync(player)
+	end
+	return ok
+end
+
 function PlayerStateService.Init()
 	local function onPlayerAdded(player: Player)
 		profiles[player] = ProgressionLogic.CreateInitialProfile()
@@ -135,30 +163,27 @@ function PlayerStateService.Init()
 	Players.PlayerAdded:Connect(onPlayerAdded)
 	Players.PlayerRemoving:Connect(function(player: Player)
 		profiles[player] = nil
+		lastPurchaseAt[player] = nil
 	end)
 
 	for _, player in Players:GetPlayers() do
 		onPlayerAdded(player)
 	end
 
-	Remotes.GetEvent("RequestUpgrade").OnServerEvent:Connect(function(player: Player, payload: any)
-		local profile = profiles[player]
-		if not profile or type(payload) ~= "table" then
+	-- Single entry point for every shop purchase (UI buttons, JellyShop prompt, UpgradeStand prompt)
+	Remotes.GetEvent("RequestPurchase").OnServerEvent:Connect(function(player: Player, payload: any)
+		if type(payload) ~= "table" or type(payload.ItemId) ~= "string" then
 			return
 		end
-		local upgradeType = payload.UpgradeType
-		local ok, msg = false, "Invalid upgrade"
-		if upgradeType == "ThrowPower" then
-			ok, msg = ProgressionLogic.PurchasePowerUpgrade(profile)
-		elseif upgradeType == "PullUpTier" then
-			ok, msg = ProgressionLogic.PurchasePullUpTier(profile)
-		elseif upgradeType == "SlotExpansion" then
-			ok, msg = ProgressionLogic.PurchaseSlotExpansion(profile)
+		local quantity: ProgressionLogic.ShopQuantity = 1
+		if payload.Quantity == "max" then
+			quantity = "max"
+		elseif type(payload.Quantity) == "number" then
+			quantity = payload.Quantity
+		elseif payload.Quantity ~= nil then
+			return
 		end
-		PlayerStateService.Toast(player, msg, if ok then "success" else "warn")
-		if ok then
-			PlayerStateService.Sync(player)
-		end
+		PlayerStateService.Purchase(player, payload.ItemId, quantity)
 	end)
 
 	Remotes.GetEvent("RequestEquipSlime").OnServerEvent:Connect(function(player: Player, payload: any)
@@ -211,43 +236,6 @@ function PlayerStateService.Init()
 			if ok then
 				PlayerStateService.Sync(player)
 			end
-		end
-	end)
-
-	Remotes.GetEvent("RequestClaimFreeGift").OnServerEvent:Connect(function(player: Player)
-		local profile = profiles[player]
-		if not profile then
-			return
-		end
-		local ok, msg = ProgressionLogic.ClaimFreeGiftSlime(profile)
-		PlayerStateService.Toast(player, msg, if ok then "success" else "warn")
-		if ok then
-			PlayerStateService.Sync(player)
-		end
-	end)
-
-	Remotes.GetEvent("RequestBuyBoost").OnServerEvent:Connect(function(player: Player, payload: any)
-		local profile = profiles[player]
-		if not profile or type(payload) ~= "table" or type(payload.BoostId) ~= "string" then
-			return
-		end
-		local ok, msg = ProgressionLogic.PurchaseShopBoost(profile, payload.BoostId)
-		PlayerStateService.Toast(player, msg, if ok then "success" else "warn")
-		if ok then
-			PlayerStateService.Sync(player)
-		end
-	end)
-
-	Remotes.GetEvent("RequestHatchEgg").OnServerEvent:Connect(function(player: Player, payload: any)
-		local profile = profiles[player]
-		if not profile or type(payload) ~= "table" or type(payload.EggId) ~= "string" then
-			return
-		end
-		local count = if payload.Count == 3 then 3 else 1
-		local ok, msg = ProgressionLogic.HatchShopEgg(profile, payload.EggId, count, nil)
-		PlayerStateService.Toast(player, msg, if ok then "success" else "warn")
-		if ok then
-			PlayerStateService.Sync(player)
 		end
 	end)
 

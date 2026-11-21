@@ -13,15 +13,16 @@ local EVENT_NAMES = {
 	"RequestThrow",
 	"ThrowBroadcast",
 	"PlayerStateSync",
-	"RequestUpgrade",
-	"RequestTrainRep",
+	"RequestPurchase", -- C->S { ItemId: string, Quantity: number | "max" }: every shop purchase
+	"TrainingState", -- S->C { Active: boolean, Interval: number? }: pull-up loop started/stopped
+	"TrainingRep", -- S->C { Gained: number, Power: number, Interval: number }: one rep paid
+	"RequestStopTraining", -- C->S: player jumped/moved off the bar
+	"TrainingBonus", -- S->C { Id: number, Window: number }: a Bonus Rep pop-up is available
+	"RequestBonusRep", -- C->S { Id: number }: player clicked the Bonus Rep pop-up
 	"RequestEquipSlime",
 	"RequestPlaceBestSlimes",
 	"RequestPlaceOnSlot",
 	"RequestPickupFromSlot",
-	"RequestClaimFreeGift",
-	"RequestHatchEgg",
-	"RequestBuyBoost",
 	"RequestEquipTrail",
 	"RequestCollect",
 	"RequestTeleport",

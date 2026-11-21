@@ -393,6 +393,39 @@ local function checkNearThrowLine(): boolean
 	return nearZ and nearY
 end
 
+-- Bold golden "PERFECT! +20" pop above the throw meter when the slider stops in the top band
+local function showPerfectCallout(bonusPower: number)
+	local label = Instance.new("TextLabel")
+	label.Name = "PerfectCallout"
+	label.AnchorPoint = Vector2.new(0.5, 0.5)
+	label.Position = UDim2.new(0.5, 0, 0.48, -200)
+	label.Size = UDim2.fromOffset(420, 80)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.FredokaOne
+	label.TextSize = 64
+	label.TextColor3 = Color3.fromRGB(255, 215, 60)
+	label.Text = `PERFECT! +{bonusPower}`
+	label.Rotation = -6
+	label.ZIndex = 15
+	label.Parent = throwGui
+	addStroke(label, Color3.fromRGB(60, 35, 5), 4)
+
+	local scale = Instance.new("UIScale")
+	scale.Scale = 0.3
+	scale.Parent = label
+	TweenService:Create(scale, TweenInfo.new(0.22, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1.15 }):Play()
+	task.delay(0.22, function()
+		TweenService:Create(scale, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	end)
+	task.delay(0.9, function()
+		local fade = TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+		TweenService:Create(label, fade, { TextTransparency = 1, Position = label.Position - UDim2.fromOffset(0, 30) }):Play()
+		task.delay(0.4, function()
+			label:Destroy()
+		end)
+	end)
+end
+
 local function triggerThrowFromMeter()
 	if isThrowInFlight or inRevealCutscene then
 		return
@@ -406,6 +439,10 @@ local function triggerThrowFromMeter()
 	meterRoot.Visible = false
 
 	local lockedRatio = currentMeterRatio
+	local lockedSeg = GameConfig.EvaluateMeterRatio(lockedRatio)
+	if lockedSeg.IsPerfect then
+		showPerfectCallout(lockedSeg.BonusPower)
+	end
 	local char = localPlayer.Character
 	local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
 	local cam = workspace.CurrentCamera
@@ -804,8 +841,14 @@ throwBroadcast.OnClientEvent:Connect(function(payload: any)
 	groundRing.CastShadow = false
 	groundRing.Parent = workspace
 
+	-- Live luck ticker: replays the server's GameConfig.ComputeFlightLuck as the bait flies, so the
+	-- top-centre "1.XXx LUCK" climbs with distance and ends exactly on the server's LuckMultiplier.
+	local meterLuck = tonumber(payload.MeterLuck) or tonumber(payload.LuckMultiplier) or 1.0
+	local baitLuck = tonumber(payload.BaitLuck) or 1.0
+	local finalLuck = tonumber(payload.LuckMultiplier) or 1.0
+	local maxDistance = 0
 	if isLocal then
-		luckValueLabel.Text = string.format("%.2fX", payload.LuckMultiplier or 1.0)
+		luckValueLabel.Text = string.format("%.2fX", GameConfig.ComputeFlightLuck(0, meterLuck, baitLuck))
 		flightHud.Visible = true
 	end
 
@@ -829,6 +872,12 @@ throwBroadcast.OnClientEvent:Connect(function(payload: any)
 
 			local floorY = ThrowPhysics.GetFloorYAtZ(math.max(0, pos.Z))
 			groundRing.CFrame = CFrame.new(pos.X, floorY + 0.15, pos.Z) * CFrame.Angles(0, 0, math.rad(90))
+
+			if isLocal then
+				maxDistance = math.max(maxDistance, math.clamp(pos.Z, 0, GameConfig.Hub.LaneMaxZ))
+				local liveLuck = math.min(finalLuck, GameConfig.ComputeFlightLuck(maxDistance, meterLuck, baitLuck))
+				luckValueLabel.Text = string.format("%.2fX", liveLuck)
+			end
 
 			if isLocal and cam then
 				local zoneDef = ThrowPhysics.GetZoneAtZ(math.max(0, pos.Z))
@@ -855,6 +904,9 @@ throwBroadcast.OnClientEvent:Connect(function(payload: any)
 				conn:Disconnect()
 			end
 			groundRing:Destroy()
+			if isLocal then
+				luckValueLabel.Text = string.format("%.2fX", finalLuck) -- land exactly on the server value
+			end
 			local finalPos = Vector3.new(sim.FinalPosition.X, sim.FinalPosition.Y, sim.FinalPosition.Z)
 
 			if isLocal then

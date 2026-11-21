@@ -75,13 +75,18 @@ function ThrowService.Init()
 			SlimeWeight = equippedDef.Weight,
 		})
 
+		-- Luck = distance down the lane x meter band x Jelly Bait quality (authoritative; the client ticker
+		-- only replays this with GameConfig.ComputeFlightLuck during the flight)
+		local baitDef = ProgressionLogic.GetBaitDef(profile)
+		local totalLuck = GameConfig.ComputeFlightLuck(simResult.Distance, meterSeg.LuckMultiplier, baitDef.LuckMultiplier)
+
 		-- Put newly caught slime into Hotbar (UnplacedSlimes) so the player can equip & place it (Clip 1/2 flow!)
 		local reward = ProgressionLogic.EvaluateThrowReward(
 			profile,
 			simResult.Distance,
 			simResult.LandedZoneIndex,
 			nil,
-			meterSeg.LuckMultiplier,
+			totalLuck,
 			nil,
 			true
 		)
@@ -99,7 +104,12 @@ function ThrowService.Init()
 			ChargeRatio = math.clamp(0.35 + 0.65 * meterRatio, 0.25, 1.0),
 			MeterRatio = meterRatio,
 			BonusPower = meterSeg.BonusPower,
-			LuckMultiplier = meterSeg.LuckMultiplier,
+			LuckMultiplier = totalLuck,
+			MeterLuck = meterSeg.LuckMultiplier,
+			BaitLuck = baitDef.LuckMultiplier,
+			BaitTier = profile.BaitTier,
+			BaitName = baitDef.Name,
+			IsPerfect = meterSeg.IsPerfect == true,
 			PitchDeg = pitchDeg,
 			YawDeg = yawDeg,
 			SlimeId = equippedDef.Id,

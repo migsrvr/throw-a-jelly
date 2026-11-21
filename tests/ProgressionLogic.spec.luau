@@ -201,4 +201,123 @@ return function(t: any)
 			expect(#p.UnplacedSlimes).toBe(4)
 		end)
 	end)
+
+	describe("ProgressionLogic - Pull-Up Loop Speed (strength + bar tier)", function()
+		local cfg = GameConfig.PullUp
+
+		it("gets faster as strength (BaseThrowPower) grows", function()
+			local p = ProgressionLogic.CreateInitialProfile()
+			local prev = ProgressionLogic.GetPullUpRepInterval(p)
+			for _, power in { 20, 100, 500, 2000 } do
+				p.BaseThrowPower = power
+				local cur = ProgressionLogic.GetPullUpRepInterval(p)
+				expect(cur <= prev).toBe(true)
+				prev = cur
+			end
+			p.BaseThrowPower = 5
+			p.PullUpTier = 1
+			expect(ProgressionLogic.GetPullUpRepInterval(p)).toBeLessThanOrEqual(cfg.BaseRepSeconds)
+			expect(ProgressionLogic.GetPullUpRepInterval(p)).toBeGreaterThan(1.0)
+		end)
+
+		it("gets faster with better bar tiers at the same strength", function()
+			local p = ProgressionLogic.CreateInitialProfile()
+			p.BaseThrowPower = 50
+			local prev = math.huge
+			for tier = 1, #GameConfig.PullUpTiers do
+				p.PullUpTier = tier
+				local cur = ProgressionLogic.GetPullUpRepInterval(p)
+				expect(cur < prev).toBe(true)
+				prev = cur
+			end
+		end)
+
+		it("never goes below MinRepSeconds or above BaseRepSeconds", function()
+			local p = ProgressionLogic.CreateInitialProfile()
+			p.BaseThrowPower = 1e12
+			p.PullUpTier = #GameConfig.PullUpTiers
+			expect(ProgressionLogic.GetPullUpRepInterval(p)).toBeNear(cfg.MinRepSeconds)
+			p.BaseThrowPower = 0
+			p.PullUpTier = 1
+			expect(ProgressionLogic.GetPullUpRepInterval(p)).toBeLessThanOrEqual(cfg.BaseRepSeconds)
+		end)
+	end)
+
+	describe("ProgressionLogic - Shop Catalog, Listing & Purchase API", function()
+		it("has a valid listing entry for every catalog item", function()
+			local p = ProgressionLogic.CreateInitialProfile()
+			local listing = ProgressionLogic.GetShopListing(p)
+			expect(#listing).toBe(#GameConfig.ShopCatalog)
+			for i, entry in listing do
+				expect(entry.Id).toBe(GameConfig.ShopCatalog[i].Id)
+				expect(entry.Title ~= entry.Id).toBe(true) -- every action filled a real title
+				expect(entry.PriceText ~= "").toBe(true)
+			end
+		end)
+
+		it("reports Unaffordable / Available from cash, and FREE for the gift", function()
+			local p = ProgressionLogic.CreateInitialProfile()
+			expect(ProgressionLogic.GetShopListingEntry(p, "boost_double_cash").State).toBe("Unaffordable")
+			expect(ProgressionLogic.GetShopListingEntry(p, "free_gift").State).toBe("Available")
+			expect(ProgressionLogic.GetShopListingEntry(p, "free_gift").PriceText).toBe("FREE")
+			p.Cash = 1e6
+			expect(ProgressionLogic.GetShopListingEntry(p, "boost_double_cash").State).toBe("Available")
+		end)
+
+		it("works with the client's synced state table, not only a full profile", function()
+			local synced = { Cash = 100, PowerUpgradeLevel = 1, PullUpTier = 5, MaxSlimes = 12, OwnedBoosts = { double_cash = true }, ClaimedFreeGift = true }
+			expect(ProgressionLogic.GetShopListingEntry(synced, "pullup_tier").State).toBe("Maxed")
+			expect(ProgressionLogic.GetShopListingEntry(synced, "slot_expansion").State).toBe("Maxed")
+			expect(ProgressionLogic.GetShopListingEntry(synced, "boost_double_cash").State).toBe("Owned")
+			expect(ProgressionLogic.GetShopListingEntry(synced, "free_gift").State).toBe("Claimed")
+			expect(ProgressionLogic.GetShopListingEntry(synced, "power_upgrade").State).toBe("Available")
+		end)
+
+		it("buys each upgrade/boost through Purchase and charges the listed price", function()
+			for _, id in { "power_upgrade", "pullup_tier", "slot_expansion", "boost_double_cash", "boost_double_power" } do
+				local p = ProgressionLogic.CreateInitialProfile()
+				p.Cash = 1e6
+				local price = ProgressionLogic.GetShopListingEntry(p, id).Price
+				local ok = ProgressionLogic.Purchase(p, id, 1)
+				expect(ok).toBe(true)
+				expect(p.Cash).toBe(1e6 - price)
+			end
+		end)
+
+		it("hatches eggs x1 / x3 and claims the free gift through Purchase", function()
+			local p = ProgressionLogic.CreateInitialProfile()
+			p.Cash = 1e6
+			local ok1, _, h1 = ProgressionLogic.Purchase(p, "egg_enchanted", 1)
+			expect(ok1).toBe(true)
+			expect(#h1).toBe(1)
+			local ok3, _, h3 = ProgressionLogic.Purchase(p, "egg_enchanted", 3)
+			expect(ok3).toBe(true)
+			expect(#h3).toBe(3)
+			local okGift, _, gift = ProgressionLogic.Purchase(p, "free_gift")
+			expect(okGift).toBe(true)
+			expect(#gift).toBe(1)
+			expect((ProgressionLogic.Purchase(p, "free_gift"))).toBe(false)
+		end)
+
+		it("'max' buys as many power upgrades as cash allows", function()
+			local p = ProgressionLogic.CreateInitialProfile()
+			p.Cash = 1000
+			local ok, _, bought = ProgressionLogic.Purchase(p, "power_upgrade", "max")
+			expect(ok).toBe(true)
+			expect(bought).toBeGreaterThan(1)
+			expect(p.Cash < GameConfig.GetPowerUpgradeCost(p.PowerUpgradeLevel)).toBe(true)
+			expect((ProgressionLogic.Purchase(p, "power_upgrade", "max"))).toBe(false)
+		end)
+
+		it("rejects unknown items, bad quantities, and insufficient cash without charging", function()
+			local p = ProgressionLogic.CreateInitialProfile()
+			p.Cash = 50
+			expect((ProgressionLogic.Purchase(p, "not_an_item", 1))).toBe(false)
+			expect((ProgressionLogic.Purchase(p, "egg_enchanted", 2))).toBe(false)
+			expect((ProgressionLogic.Purchase(p, "boost_double_cash", 3))).toBe(false)
+			expect((ProgressionLogic.Purchase(p, "pullup_tier", "max"))).toBe(false)
+			expect((ProgressionLogic.Purchase(p, "boost_double_cash", 1))).toBe(false)
+			expect(p.Cash).toBe(50)
+		end)
+	end)
 end
