@@ -302,10 +302,10 @@ for _, id in GameConfig.ShopBoostOrder do
 end
 add()
 
-add("### Eggs")
+add("### Eggs (Robux-only)")
 add()
 for _, egg in GameConfig.ShopEggs do
-	add(`**{egg.Name}** (tag: "{egg.Tag}") - ${num(egg.Buy1Cost)} for 1, ${num(egg.Buy3Cost)} for 3. Accent colour {hex(egg.AccentColor)}.`)
+	add(`**{egg.Name}** (tag: "{egg.Tag}") - R$ {num(egg.Buy1Robux)} for 1 (ProductId {egg.Buy1ProductId}), R$ {num(egg.Buy3Robux)} for 3 (ProductId {egg.Buy3ProductId}). Accent colour {hex(egg.AccentColor)}.`)
 	add()
 	header({ "Slime", "Mutation", "Chance", "Bonus label shown on the card" })
 	for _, item in egg.Items do
@@ -354,7 +354,7 @@ end
 add()
 add("### Daily login streak")
 add()
-add("Claimed automatically once per day (UTC) when the player joins or is online at midnight. Missing a day restarts at day 1.")
+add("Claimed manually once per UTC day in the Rewards window (7-day calendar). Missing a day restarts at day 1.")
 add(`After day {#g.DailyRewards} the streak keeps paying the day-{#g.DailyRewards} amount.`)
 add()
 header({ "Streak day", "Gems" })
@@ -383,6 +383,54 @@ add()
 add(`Once bought, an AUTO toggle appears under the throw meter. While it's on, the player throws by itself after {GameConfig.AutoThrow.IdleDelaySeconds}s at the throw line,`)
 local autoSeg = GameConfig.EvaluateMeterRatio(GameConfig.AutoThrow.MeterRatio)
 add(`always stopping the meter in band {autoSeg.Index} (+{autoSeg.BonusPower} power, {string.format("%.2f", autoSeg.LuckMultiplier)}x luck), so a PERFECT by hand is still better.`)
+add()
+
+-- Quests ----------------------------------------------------------------------
+local function rewardStr(r: GameConfig.QuestReward): string
+	local parts = {}
+	if r.Gems and r.Gems > 0 then
+		table.insert(parts, `{num(r.Gems)} Gems`)
+	end
+	if r.Cash and r.Cash > 0 then
+		table.insert(parts, "$" .. num(r.Cash))
+	end
+	return table.concat(parts, " + ")
+end
+
+add("## Quests")
+add()
+add(`### Quest Line ({#GameConfig.Quests.Line} steps, linear, never resets)`)
+add()
+header({ "Step", "Id", "Title", "Event", "Target", "Reward" })
+for i, q in GameConfig.Quests.Line do
+	row({ tostring(i), q.Id, q.Title, q.Event, num(q.Target), rewardStr(q.Reward) })
+end
+add()
+add(`### Daily Quest Pool ({#GameConfig.Quests.DailyPool} templates, {GameConfig.Quests.DailyCount} picked per UTC day)`)
+add()
+header({ "Id", "Title", "Event", "Target", "Reward" })
+for _, q in GameConfig.Quests.DailyPool do
+	row({ q.Id, q.Title, q.Event, num(q.Target), rewardStr(q.Reward) })
+end
+add()
+
+-- Robux Store -----------------------------------------------------------------
+add("## Robux Store")
+add()
+add("### Game Passes")
+add()
+header({ "Id", "Name", "Icon", "Robux (R$)", "PassId", "Effect", "Colour" })
+for _, p in GameConfig.Robux.Passes do
+	row({ p.Id, p.Name, p.Icon, tostring(p.RobuxPrice), tostring(p.PassId), p.Description, hex(p.Color) })
+end
+add()
+add("### Gem Packs (Developer Products)")
+add()
+header({ "Id", "Name", "Tag", "Gems", "Robux (R$)", "ProductId" })
+for _, pack in GameConfig.Robux.GemPacks do
+	local tag = if pack.BonusTag and pack.BonusTag ~= "" then pack.BonusTag else "—"
+	row({ pack.Id, pack.Name, tag, "+" .. num(pack.Gems), tostring(pack.RobuxPrice), tostring(pack.ProductId) })
+end
 add()
 
 -- Saving ----------------------------------------------------------------------

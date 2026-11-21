@@ -145,7 +145,7 @@ function SlimeFactory.CreateSlimeModel(slimeId: string, showBillboard: boolean?,
 		sub.Font = Enum.Font.FredokaOne
 		sub.TextScaled = true
 		sub.TextColor3 = Color3.fromRGB(115, 255, 130)
-		sub.Text = `$${GameConfig.FormatNumber(incomeVal)}/s`
+		sub.Text = `${GameConfig.FormatNumber(incomeVal)}/s`
 		sub.Parent = bb
 
 		local stroke2 = stroke1:Clone()

@@ -27,12 +27,19 @@ local Remotes = require(Shared:WaitForChild("Remotes"))
 local SlimeFactory = require(Shared:WaitForChild("SlimeFactory"))
 local UiKit = require(Shared:WaitForChild("UiKit"))
 
+local HudWindows = script.Parent:WaitForChild("HudWindows")
+local UpgradesWindow = require(HudWindows:WaitForChild("UpgradesWindow"))
+local RewardsWindow = require(HudWindows:WaitForChild("RewardsWindow"))
+local RobuxStoreWindow = require(HudWindows:WaitForChild("RobuxStoreWindow"))
+
 local stateSync = Remotes.GetEvent("PlayerStateSync")
 local toastNotify = Remotes.GetEvent("ToastNotify")
 local requestPurchase = Remotes.GetEvent("RequestPurchase")
 local requestPlaceBest = Remotes.GetEvent("RequestPlaceBestSlimes")
 local requestPlaceOnSlot = Remotes.GetEvent("RequestPlaceOnSlot")
 local requestEquipTrail = Remotes.GetEvent("RequestEquipTrail")
+local requestClaimDaily = Remotes.GetEvent("RequestClaimDaily")
+local requestClaimQuest = Remotes.GetEvent("RequestClaimQuest")
 
 -- ============================================================================
 -- SHOP BINDING (logic lives in GameConfig.ShopCatalog + ProgressionLogic.GetShopListing/Purchase)
@@ -49,14 +56,6 @@ local shopLabelBindings: { ShopLabelBinding } = {}
 local function bindShopLabel(label: TextLabel?, itemId: string, optionIndex: number, style: "Row" | "RowWide" | "Option")
 	if label then
 		table.insert(shopLabelBindings, { Label = label, ItemId = itemId, OptionIndex = optionIndex, Style = style })
-	end
-end
-
--- Catalog id for each egg (so egg cards built from GameConfig.ShopEggs know what to buy)
-local eggCatalogId: { [string]: string } = {}
-for _, item in GameConfig.ShopCatalog do
-	if item.Action == "Egg" and item.Args.EggId then
-		eggCatalogId[item.Args.EggId] = item.Id
 	end
 end
 
@@ -419,308 +418,8 @@ indexFooterLabel.Parent = indexModal
 addStroke(indexFooterLabel, Color3.fromRGB(15, 18, 25), 2.2)
 
 -- ============================================================================
--- 6. SHOP MODAL ("Shop" button — Clip 2 00:11–00:15)
+-- 6. SHOP LABEL REFRESH (used by UpgradesWindow & RobuxStoreWindow)
 -- ============================================================================
-local shopModal = Instance.new("Frame")
-shopModal.Name = "ShopModal"
-shopModal.AnchorPoint = Vector2.new(0.5, 0.5)
-shopModal.Position = UDim2.fromScale(0.5, 0.5)
-shopModal.Size = UDim2.fromOffset(650, 435)
-shopModal.BackgroundColor3 = Color3.fromRGB(34, 38, 46)
-shopModal.Visible = false
-shopModal.ZIndex = 10
-shopModal.Parent = screenGui
-addCorner(shopModal, 14)
-addStroke(shopModal, Color3.fromRGB(15, 18, 24), 3.2, Enum.ApplyStrokeMode.Border)
-
-local shopHeader = Instance.new("Frame")
-shopHeader.Size = UDim2.new(1, 0, 0, 54)
-shopHeader.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-shopHeader.Parent = shopModal
-addCorner(shopHeader, 14)
-UiKit.AddGlossGradient(shopHeader, Color3.fromRGB(175, 70, 245))
-addStroke(shopHeader, Color3.fromRGB(20, 12, 32), 2.2, Enum.ApplyStrokeMode.Border)
-
-local shopTitle = Instance.new("TextLabel")
-shopTitle.Position = UDim2.fromOffset(18, 6)
-shopTitle.Size = UDim2.fromOffset(180, 40)
-shopTitle.BackgroundTransparency = 1
-shopTitle.Font = Enum.Font.FredokaOne
-shopTitle.TextSize = 28
-shopTitle.TextXAlignment = Enum.TextXAlignment.Left
-shopTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-shopTitle.Text = "Shop"
-shopTitle.Parent = shopHeader
-addStroke(shopTitle, Color3.fromRGB(20, 10, 30), 2.5)
-
-UiKit.CreateBevelButton({
-	Name = "CloseBtn",
-	Parent = shopHeader,
-	AnchorPoint = Vector2.new(1, 0.5),
-	Position = UDim2.new(1, -10, 0.5, 1),
-	Size = UDim2.fromOffset(40, 40),
-	Color = Color3.fromRGB(235, 55, 65),
-	CornerRadius = 9,
-	Text = "X",
-	TextSize = 22,
-	OnClick = function()
-		UiKit.ToggleModalAnimated(shopModal, modalScrim, false)
-	end,
-})
-
-local shopScroll = Instance.new("ScrollingFrame")
-shopScroll.Position = UDim2.fromOffset(14, 64)
-shopScroll.Size = UDim2.new(1, -28, 1, -76)
-shopScroll.BackgroundTransparency = 1
-shopScroll.BorderSizePixel = 0
-shopScroll.ScrollBarThickness = 6
-shopScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-shopScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-shopScroll.Parent = shopModal
-
-local shopListLayout = Instance.new("UIListLayout")
-shopListLayout.Padding = UDim.new(0, 14)
-shopListLayout.Parent = shopScroll
-
--- Build Shop Egg Cards with live 3D ViewportFrame Slime Previews!
-for _, eggDef in GameConfig.ShopEggs do
-	local eggCard = Instance.new("Frame")
-	eggCard.Size = UDim2.new(1, -10, 0, 172)
-	eggCard.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-	eggCard.Parent = shopScroll
-	addCorner(eggCard, 12)
-	UiKit.AddGlossGradient(eggCard, SlimeFactory.ToColor3(eggDef.AccentColor):Lerp(Color3.fromRGB(32, 26, 52), 0.42))
-	addStroke(eggCard, Color3.fromRGB(18, 15, 28), 2.5, Enum.ApplyStrokeMode.Border)
-
-	local hdr = Instance.new("TextLabel")
-	hdr.Position = UDim2.fromOffset(16, 6)
-	hdr.Size = UDim2.new(1, -32, 0, 28)
-	hdr.BackgroundTransparency = 1
-	hdr.Font = Enum.Font.FredokaOne
-	hdr.TextSize = 24
-	hdr.TextColor3 = Color3.fromRGB(255, 235, 95)
-	hdr.Text = `{eggDef.Name}  [{eggDef.Tag}]`
-	hdr.Parent = eggCard
-	addStroke(hdr, Color3.fromRGB(18, 15, 25), 2.2)
-
-	local oddsRow = Instance.new("Frame")
-	oddsRow.Position = UDim2.fromOffset(14, 38)
-	oddsRow.Size = UDim2.new(1, -28, 0, 76)
-	oddsRow.BackgroundTransparency = 1
-	oddsRow.Parent = eggCard
-
-	local oddsLayout = Instance.new("UIListLayout")
-	oddsLayout.FillDirection = Enum.FillDirection.Horizontal
-	oddsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	oddsLayout.Padding = UDim.new(0, 8)
-	oddsLayout.Parent = oddsRow
-
-	for _, item in eggDef.Items do
-		local sDef = GameConfig.SlimesById[item.SlimeId] or GameConfig.Slimes[1]
-		local tile = Instance.new("Frame")
-		tile.Size = UDim2.fromOffset(88, 74)
-		tile.BackgroundColor3 = SlimeFactory.GetRarityColor(sDef.Rarity):Lerp(Color3.fromRGB(25, 28, 38), 0.35)
-		tile.Parent = oddsRow
-		addCorner(tile, 9)
-		addStroke(tile, Color3.fromRGB(15, 18, 25), 2, Enum.ApplyStrokeMode.Border)
-
-		-- Real 3D ViewportFrame preview inside each Egg Odds Card!
-		local vpHolder = Instance.new("Frame")
-		vpHolder.AnchorPoint = Vector2.new(0.5, 0.5)
-		vpHolder.Position = UDim2.fromScale(0.5, 0.5)
-		vpHolder.Size = UDim2.fromOffset(54, 50)
-		vpHolder.BackgroundTransparency = 1
-		vpHolder.Parent = tile
-		UiKit.CreateSlimeViewport(vpHolder, item.SlimeId, item.Mutation, false)
-
-		local pct = Instance.new("TextLabel")
-		pct.Size = UDim2.new(1, 0, 0, 18)
-		pct.BackgroundTransparency = 1
-		pct.Font = Enum.Font.FredokaOne
-		pct.TextSize = 15
-		pct.TextColor3 = Color3.fromRGB(255, 255, 255)
-		pct.Text = `{item.ChancePercent}%`
-		pct.ZIndex = 3
-		pct.Parent = tile
-		addStroke(pct, Color3.fromRGB(15, 18, 25), 1.6)
-
-		local inc = Instance.new("TextLabel")
-		inc.AnchorPoint = Vector2.new(0.5, 1)
-		inc.Position = UDim2.new(0.5, 0, 1, -2)
-		inc.Size = UDim2.new(1, -4, 0, 16)
-		inc.BackgroundTransparency = 1
-		inc.Font = Enum.Font.FredokaOne
-		inc.TextSize = 13
-		inc.TextColor3 = Color3.fromRGB(115, 255, 130)
-		inc.Text = item.BonusLabel
-		inc.ZIndex = 3
-		inc.Parent = tile
-		addStroke(inc, Color3.fromRGB(15, 18, 25), 1.5)
-	end
-
-	local eggItemId = eggCatalogId[eggDef.Id] or eggDef.Id
-
-	local _, _, buy1Lbl = UiKit.CreateBevelButton({
-		Name = "Buy1Btn",
-		Parent = eggCard,
-		Position = UDim2.new(0.5, -172, 1, -44),
-		Size = UDim2.fromOffset(158, 36),
-		Color = Color3.fromRGB(85, 235, 75),
-		CornerRadius = 9,
-		Text = "Buy x1",
-		TextSize = 17,
-		OnClick = function()
-			buyShopItem(eggItemId, 1)
-		end,
-	})
-	bindShopLabel(buy1Lbl, eggItemId, 1, "Option")
-
-	local _, _, buy3Lbl = UiKit.CreateBevelButton({
-		Name = "Buy3Btn",
-		Parent = eggCard,
-		Position = UDim2.new(0.5, 14, 1, -44),
-		Size = UDim2.fromOffset(158, 36),
-		Color = Color3.fromRGB(65, 215, 110),
-		CornerRadius = 9,
-		Text = "Buy x3",
-		TextSize = 17,
-		OnClick = function()
-			buyShopItem(eggItemId, 3)
-		end,
-	})
-	bindShopLabel(buy3Lbl, eggItemId, 2, "Option")
-end
-
--- Upgrades & Boosts Row in Shop
-local upgradesCard = Instance.new("Frame")
-upgradesCard.Size = UDim2.new(1, -10, 0, 168)
-upgradesCard.BackgroundColor3 = Color3.fromRGB(46, 52, 66)
-upgradesCard.Parent = shopScroll
-addCorner(upgradesCard, 12)
-addStroke(upgradesCard, Color3.fromRGB(18, 20, 28), 2.2, Enum.ApplyStrokeMode.Border)
-
--- Upgrade/boost buttons: layout is UI's choice; which item each button buys is just a catalog id.
-local HALF_WIDTH = UDim2.new(0.5, -18, 0, 40)
-local UPGRADE_ROW_LAYOUT: { { ItemId: string, Position: UDim2, Size: UDim2? } } = {
-	{ ItemId = "power_upgrade", Position = UDim2.fromOffset(12, 12) },
-	{ ItemId = "pullup_tier", Position = UDim2.new(0.5, 6, 0, 12) },
-	{ ItemId = "boost_double_cash", Position = UDim2.fromOffset(12, 64) },
-	{ ItemId = "boost_double_power", Position = UDim2.new(0.5, 6, 0, 64) },
-	-- Jelly Bait quality: shows next bait name + current -> next Luck (from the listing subtitle)
-	{ ItemId = "bait_tier", Position = UDim2.fromOffset(12, 116), Size = UDim2.new(1, -24, 0, 40) },
-}
-for _, slot in UPGRADE_ROW_LAYOUT do
-	local item = GameConfig.ShopCatalogById[slot.ItemId]
-	if item then
-		local _, _, lbl = UiKit.CreateBevelButton({
-			Name = `Buy_{item.Id}`,
-			Parent = upgradesCard,
-			Position = slot.Position,
-			Size = slot.Size or HALF_WIDTH,
-			Color = SlimeFactory.ToColor3(item.Color),
-			CornerRadius = 9,
-			Text = item.Icon,
-			TextSize = 16,
-			OnClick = function()
-				buyShopItem(item.Id, 1)
-			end,
-		})
-		bindShopLabel(lbl, item.Id, 1, if slot.Size then "RowWide" else "Row")
-	end
-end
-
--- Gem Shop card: every catalog item with Category "Gem" (paid from the 💎 wallet), one wide row each
-local gemItems: { GameConfig.ShopCatalogItem } = {}
-for _, item in GameConfig.ShopCatalog do
-	if item.Category == "Gem" then
-		table.insert(gemItems, item)
-	end
-end
-
-local gemCard = Instance.new("Frame")
-gemCard.Name = "GemShopCard"
-gemCard.Size = UDim2.new(1, -10, 0, 52 + #gemItems * 52)
-gemCard.BackgroundColor3 = Color3.fromRGB(40, 50, 72)
-gemCard.Parent = shopScroll
-addCorner(gemCard, 12)
-addStroke(gemCard, Color3.fromRGB(18, 20, 28), 2.2, Enum.ApplyStrokeMode.Border)
-
-local gemCardTitle = Instance.new("TextLabel")
-gemCardTitle.Position = UDim2.fromOffset(14, 8)
-gemCardTitle.Size = UDim2.new(1, -28, 0, 36)
-gemCardTitle.BackgroundTransparency = 1
-gemCardTitle.Font = Enum.Font.FredokaOne
-gemCardTitle.TextSize = 24
-gemCardTitle.TextXAlignment = Enum.TextXAlignment.Left
-gemCardTitle.TextColor3 = Color3.fromRGB(120, 200, 255)
-gemCardTitle.Text = "💎 GEM SHOP"
-gemCardTitle.Parent = gemCard
-addStroke(gemCardTitle, Color3.fromRGB(15, 18, 25), 2.2)
-
-for i, item in gemItems do
-	local _, _, lbl = UiKit.CreateBevelButton({
-		Name = `Buy_{item.Id}`,
-		Parent = gemCard,
-		Position = UDim2.fromOffset(12, 52 + (i - 1) * 52),
-		Size = UDim2.new(1, -24, 0, 40),
-		Color = SlimeFactory.ToColor3(item.Color),
-		CornerRadius = 9,
-		Text = item.Icon,
-		TextSize = 16,
-		OnClick = function()
-			buyShopItem(item.Id, 1)
-		end,
-	})
-	bindShopLabel(lbl, item.Id, 1, "RowWide")
-end
-
--- Free Slime Claim Card with 3D ViewportFrame preview (Clip 2 00:15)
-local freeGiftCard = Instance.new("Frame")
-freeGiftCard.Size = UDim2.new(1, -10, 0, 108)
-freeGiftCard.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-freeGiftCard.Parent = shopScroll
-addCorner(freeGiftCard, 12)
-UiKit.AddGlossGradient(freeGiftCard, Color3.fromRGB(65, 175, 245))
-addStroke(freeGiftCard, Color3.fromRGB(18, 22, 32), 2.5, Enum.ApplyStrokeMode.Border)
-
-local freeVpHolder = Instance.new("Frame")
-freeVpHolder.Position = UDim2.fromOffset(12, 10)
-freeVpHolder.Size = UDim2.fromOffset(86, 86)
-freeVpHolder.BackgroundColor3 = Color3.fromRGB(35, 95, 155)
-freeVpHolder.Parent = freeGiftCard
-addCorner(freeVpHolder, 10)
-addStroke(freeVpHolder, Color3.fromRGB(15, 20, 30), 2, Enum.ApplyStrokeMode.Border)
-UiKit.CreateSlimeViewport(freeVpHolder, GameConfig.FreeGift.SlimeId, GameConfig.FreeGift.Mutation, false)
-
-local freeGiftTitle = Instance.new("TextLabel")
-freeGiftTitle.Position = UDim2.fromOffset(112, 16)
-freeGiftTitle.Size = UDim2.new(1, -290, 0, 74)
-freeGiftTitle.BackgroundTransparency = 1
-freeGiftTitle.Font = Enum.Font.FredokaOne
-freeGiftTitle.TextSize = 22
-freeGiftTitle.TextWrapped = true
-freeGiftTitle.TextXAlignment = Enum.TextXAlignment.Left
-freeGiftTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-freeGiftTitle.Text = "Free Slime!\nClaim your free Emerald Sakura ($18/s)"
-freeGiftTitle.Parent = freeGiftCard
-addStroke(freeGiftTitle, Color3.fromRGB(15, 20, 30), 2.2)
-
-local _, _, freeGiftClaimLbl = UiKit.CreateBevelButton({
-	Name = "FreeClaimBtn",
-	Parent = freeGiftCard,
-	AnchorPoint = Vector2.new(1, 0.5),
-	Position = UDim2.new(1, -18, 0.5, 2),
-	Size = UDim2.fromOffset(152, 48),
-	Color = Color3.fromRGB(95, 245, 75),
-	CornerRadius = 11,
-	Text = "CLAIM!",
-	TextSize = 24,
-	OnClick = function()
-		buyShopItem("free_gift", 1)
-	end,
-})
-bindShopLabel(freeGiftClaimLbl, "free_gift", 1, "Option")
-
 -- Fill every bound shop label from the shared listing (computed locally from synced state)
 local function refreshShopLabels()
 	local byId: { [string]: ProgressionLogic.ShopListingEntry } = {}
@@ -833,48 +532,127 @@ UiKit.CreateBevelButton({
 	end,
 })
 
--- Create the 3 Reference 3D-Bevel Navigation Buttons (Index & Shop on Left, Slimes on Right)
+-- Build Modular HUD Windows (Tabbed Upgrades, Rewards + Quests, Unified Left-Side Robux Shop)
+local upgradesWin = UpgradesWindow.Build(screenGui, {
+	ModalScrim = modalScrim,
+	BindShopLabel = bindShopLabel,
+	BuyShopItem = buyShopItem,
+})
+
+local rewardsWin = RewardsWindow.Build(screenGui, {
+	ModalScrim = modalScrim,
+	OnClaimDaily = function()
+		requestClaimDaily:FireServer()
+	end,
+	OnClaimQuest = function(kind: "Line" | "Daily", index: number?)
+		requestClaimQuest:FireServer({ Kind = kind, Index = index })
+	end,
+})
+
+local robuxWin = RobuxStoreWindow.Build(screenGui, {
+	ModalScrim = modalScrim,
+	OnToast = showToast,
+	BindShopLabel = bindShopLabel,
+	BuyShopItem = buyShopItem,
+})
+
+local allModals: { Frame } = {
+	indexModal,
+	robuxWin.Frame,
+	upgradesWin.Frame,
+	rewardsWin.Frame,
+	slimesModal,
+}
+
+local function toggleExclusiveModal(target: Frame)
+	local willOpen = not target.Visible
+	for _, m in allModals do
+		if m ~= target then
+			m.Visible = false
+		end
+	end
+	UiKit.ToggleModalAnimated(target, modalScrim, willOpen)
+end
+
+-- Left Column (3 buttons, top to bottom): Index (📘), Shop (R$ Robux Shop), Upgrades (⬆️)
 createSquareBevelNavButton(
 	"IndexNavBtn",
 	"📘",
 	"Index",
 	Color3.fromRGB(45, 140, 235),
-	UDim2.new(0, 16, 0.5, -46),
+	UDim2.new(0, 16, 0.5, -90),
 	Vector2.new(0, 0.5),
 	function()
-		shopModal.Visible = false
-		slimesModal.Visible = false
-		UiKit.ToggleModalAnimated(indexModal, modalScrim, not indexModal.Visible)
+		toggleExclusiveModal(indexModal)
 	end,
 	false
 )
 
 createSquareBevelNavButton(
 	"ShopNavBtn",
-	"🧰",
+	"R$",
 	"Shop",
 	Color3.fromRGB(220, 55, 55),
-	UDim2.new(0, 16, 0.5, 46),
+	UDim2.new(0, 16, 0.5, 0),
 	Vector2.new(0, 0.5),
 	function()
-		indexModal.Visible = false
-		slimesModal.Visible = false
-		UiKit.ToggleModalAnimated(shopModal, modalScrim, not shopModal.Visible)
+		toggleExclusiveModal(robuxWin.Frame)
 	end,
 	false
 )
+
+createSquareBevelNavButton(
+	"UpgradesNavBtn",
+	"⬆️",
+	"Upgrades",
+	Color3.fromRGB(55, 175, 235),
+	UDim2.new(0, 16, 0.5, 90),
+	Vector2.new(0, 0.5),
+	function()
+		toggleExclusiveModal(upgradesWin.Frame)
+	end,
+	false
+)
+
+-- Right Column (2 buttons, top to bottom): Rewards (🎁, with red "!" badge) and Slimes
+local rewardsNavBtn = createSquareBevelNavButton(
+	"RewardsNavBtn",
+	"🎁",
+	"Rewards",
+	Color3.fromRGB(245, 155, 45),
+	UDim2.new(1, -16, 0.5, -46),
+	Vector2.new(1, 0.5),
+	function()
+		toggleExclusiveModal(rewardsWin.Frame)
+	end,
+	false
+)
+
+local rewardsBadge = Instance.new("TextLabel")
+rewardsBadge.Name = "ClaimBadge"
+rewardsBadge.AnchorPoint = Vector2.new(0.5, 0.5)
+rewardsBadge.Position = UDim2.new(1, -6, 0, 6)
+rewardsBadge.Size = UDim2.fromOffset(26, 26)
+rewardsBadge.BackgroundColor3 = Color3.fromRGB(245, 45, 55)
+rewardsBadge.Font = Enum.Font.FredokaOne
+rewardsBadge.TextSize = 18
+rewardsBadge.TextColor3 = Color3.fromRGB(255, 255, 255)
+rewardsBadge.Text = "!"
+rewardsBadge.ZIndex = 6
+rewardsBadge.Visible = false
+rewardsBadge.Parent = rewardsNavBtn
+addCorner(rewardsBadge, 13)
+addStroke(rewardsBadge, Color3.fromRGB(20, 10, 12), 2)
 
 createSquareBevelNavButton(
 	"SlimesNavBtn",
 	"",
 	"Slimes",
 	Color3.fromRGB(225, 130, 35),
-	UDim2.new(1, -16, 0.5, 0),
+	UDim2.new(1, -16, 0.5, 46),
 	Vector2.new(1, 0.5),
 	function()
-		indexModal.Visible = false
-		shopModal.Visible = false
-		UiKit.ToggleModalAnimated(slimesModal, modalScrim, not slimesModal.Visible)
+		toggleExclusiveModal(slimesModal)
 	end,
 	true
 )
@@ -944,7 +722,7 @@ local function rebuildHotbar()
 		topIncome.Font = Enum.Font.FredokaOne
 		topIncome.TextSize = 14
 		topIncome.TextColor3 = Color3.fromRGB(115, 255, 130)
-		topIncome.Text = `$${GameConfig.FormatNumber(inst.IncomePerSec)}/s`
+		topIncome.Text = `${GameConfig.FormatNumber(inst.IncomePerSec)}/s`
 		topIncome.ZIndex = 3
 		topIncome.Parent = tile
 		addStroke(topIncome, Color3.fromRGB(15, 18, 25), 1.6)
@@ -1192,7 +970,7 @@ local function rebuildBackpackModal()
 			Size = UDim2.new(1, -10, 0, 44),
 			Color = SlimeFactory.GetRarityColor(def.Rarity):Lerp(Color3.fromRGB(38, 44, 58), 0.55),
 			CornerRadius = 9,
-			Text = `🟢 {mutTag}{inst.Name} — +$${GameConfig.FormatNumber(inst.IncomePerSec)}/s  (Click to Place)`,
+			Text = `🟢 {mutTag}{inst.Name} — +${GameConfig.FormatNumber(inst.IncomePerSec)}/s  (Click to Place)`,
 			TextSize = 16,
 			OnClick = function()
 				local freeSlot = findFirstFreePlotSlot() or 1
@@ -1211,6 +989,9 @@ local function refreshAllUi()
 	gemsRowLabel.Text = `💎 {GameConfig.FormatNumber(currentState.Gems or 0)}`
 
 	refreshShopLabels()
+	upgradesWin.Refresh(currentState)
+	rewardsBadge.Visible = rewardsWin.Refresh(currentState)
+	robuxWin.Refresh(currentState)
 
 	rebuildHotbar()
 	rebuildSlimeIndexModal()

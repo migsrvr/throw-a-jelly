@@ -13,8 +13,9 @@ Legend: ✅ built and covered by automated tests · 🟡 built, **not yet confir
 | Player profile (cash, gems, power, slimes, boosts, discoveries) | ✅ | `ProgressionLogic.luau`; loaded from the save on join |
 | Save format (profile <-> DataStore table) | ✅ | `ProfileSerializer.luau`; JSON round trip, old-save defaults and bad-data clean-up tested |
 | **Saving progress** (DataStore) | 🟡 | `DataService.luau`: load with retries, autosave every 60 s, save on leave and on shutdown. Needs a published place + "Enable Studio Access to API Services" to test in Studio. No session locking yet |
-| Gems: earning (Index milestones, first zone reach, daily streak, rare catches) | ✅ | reducers in `ProgressionLogic.luau`, `tests/Gems.spec.luau`; daily claim runs in `PlayerStateService` |
-| Gems: spending (Auto-Throw, Lucky Charm, +4 slots) | ✅ | same shop purchase path, `PriceKind = "Gems"` |
+| Gems: earning (Index milestones, first zone reach, daily streak, rare catches) | ✅ | reducers in `ProgressionLogic.luau`, `tests/Gems.spec.luau`; manual daily claim via `RequestClaimDaily` |
+| Gems: spending (Auto-Throw, Lucky Charm, +4 slots) | ✅ | same shop purchase path, `PriceKind = "Gems"`, shown in `UpgradesWindow.luau` |
+| Quests (12-step Quest Line + 3 deterministic Daily Quests) | ✅ | `QuestLogic.luau` + `GameConfig.Quests`, tested in `tests/Quests.spec.luau`; claimed via `RequestClaimQuest` |
 | Auto-Throw | 🟡 | toggle + loop in `ThrowController.client.luau`, ownership checked in `ThrowService.luau`; untested in Studio |
 | Throw validation and landing/reward | ✅ | `ThrowService.luau` + `ThrowPhysics.luau`; server re-simulates the throw |
 | Zone gating by Throw Power | ✅ | tested in `ThrowPhysics.spec` |
@@ -23,18 +24,18 @@ Legend: ✅ built and covered by automated tests · 🟡 built, **not yet confir
 | Place / pick up slimes on plot slots, auto-place best | ✅ | |
 | Passive income (every second) and collect pad | ✅ | cash goes straight to the wallet; collect pad also works |
 | Plot assignment per player | 🟡 | `PlotAssignment.server.luau`; legacy script, not covered by tests |
-| Pull-up training loop (toggle, cadence, anti-cheat) | 🟡 | `PlotService.luau`; speed rule is tested, the loop itself is not |
+| Pull-up training loop (step-on auto-start, E to upgrade bar, cadence, anti-cheat) | 🟡 | `PlotService.luau`; speed rule is tested, the loop itself is not |
 | Shop catalog + single purchase path | ✅ | `RequestPurchase`; 7 purchase tests; see [shop-catalog.md](shop-catalog.md) |
 | Leaderboards in the hub | 🟡 | refreshed from `PlotService.luau`; untested |
 | Map clean-up (flicker/shadow fixes) | 🟡 | `MapOptimizer.luau`, runs once on start; edits ~13,000 map parts |
-| Robux purchases (passes, products, gem packs) | ⬜ | `PriceKind` supports Cash and Gems; Robux needs real product ids and a `ProcessReceipt` handler |
+| Robux purchases (passes, products, gem packs) | ✅ | `MonetizationService.luau` (`ProcessReceipt` with receipt dedupe + immediate save, `UserOwnsGamePassAsync`) + `RobuxStoreWindow.luau`; IDs default to `0` ("Coming soon") until configured |
 
 ## Client systems
 
 | System | Status | Notes |
 | --- | --- | --- |
-| HUD, hotbar, objective arrow | 🟡 | `HudController.client.luau`; placeholder styling, see [UI-HANDOFF.md](UI-HANDOFF.md) |
-| Shop window | 🟡 | now driven by the shared shop list; prices no longer typed in UI code |
+| HUD (6 nav buttons, hotbar, objective arrow) | 🟡 | `HudController.client.luau`; Left: Index, Shop, Upgrades; Right: Rewards (with `"!"` badge), Store (`R$`), Slimes |
+| Shop (Cash), Upgrades + Gems, Rewards + Quests, Robux Store windows | 🟡 | `HudController.client.luau` + `HudWindows/UpgradesWindow.luau`, `RewardsWindow.luau`, `RobuxStoreWindow.luau` |
 | Slime Index, Slimes backpack | 🟡 | placeholder styling |
 | Throw meter, flight HUD, reveal cutscene | 🟡 | `ThrowController.client.luau`; closest to final |
 | Training controller (floating "+X", stop on jump/walk) | 🟡 | `TrainingController.client.luau` |
@@ -69,10 +70,7 @@ The generated data tables in [DATA-REFERENCE.md](DATA-REFERENCE.md) come from `l
 
 ## Known problems
 
-1. 🔴 **Double dollar sign in text** (for example `$$25`). The text templates use `$${...}`, which prints two
-   dollar signs. About 22 places across `ProgressionLogic.luau`, `PlotService.luau`, `HudController.client.luau`,
-   `ThrowController.client.luau`, `SlimeFactory.luau`. Shop prices from the new shop list are correct; error
-   messages like "Need $$25 Cash" and the bar billboard "Upgrade: $$75" are not. Fix: replace `$${` with `${`.
+1. ✅ **Double dollar sign in text (`$$25`) — FIXED.** Replaced all `$${...}` template strings with `${...}` across `ProgressionLogic.luau`, `PlotService.luau`, `HudController.client.luau`, `ThrowController.client.luau`, and `SlimeFactory.luau`.
 2. 🟡 **Saving is built but unconfirmed in Studio** (above). Without API access it turns itself off with one
    warning and the player sees "Progress can't be saved this session."
 3. 🟡 **Debug output still on:** `DEBUG = true` in `CharacterAnimator.luau`, the `[ThrowController] loaded` print in

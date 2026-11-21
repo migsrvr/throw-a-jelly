@@ -1,23 +1,20 @@
 # UI plan: Robux Store, Upgrades + Gems, Rewards, and a step-on pull-up bar
 
-> Status: **planned, not started** (written 2026-11-22). Build in order: Phase 1, then 2, then 3, with tests passing after each.
+> Status: **implemented and tested** (2026-11-22). All three phases (Shop split + step-on pull-up bar, Rewards window with 7-day calendar + linear/daily quests, and Robux Store window + MonetizationService) are built and covered by Lune unit tests.
 
-## Decisions (from the 2026-11-22 planning session)
-- **Four shop-type windows:**
-  1. **Robux Store:** things bought with Robux.
-  2. **Upgrades:** the Jelly Bait upgrade plus everything bought with Gems (Auto-Throw, Lucky Charm, and more later).
-  3. **Rewards:** daily reward claim plus quests.
-  4. **Shop (Cash), kept:** eggs, Throw Power, x2 boosts, free gift.
-- **The pull-up bar upgrade leaves the shop.** Stepping into range of your own bar starts training automatically (no E). The bar's E prompt becomes **"Upgrade Bar ($X)"**.
-- **Robux:** build the UI and the purchase code now, and paste the product ids in later.
-- **Daily reward:** manual claim on a 7-day calendar (replaces today's auto-claim on join).
-- **Quests:** both a linear quest line and 3 daily quests.
-- All new windows use the programmer-placeholder styling (UiKit bevel/gloss) so the designer can restyle them later.
+## Decisions (from the 2026-11-22 planning session + follow-up refinement)
+- **Unified Left-Side Robux Shop + 3-Tab Upgrades (`⬆️`):**
+  1. **Shop (`R$`, left side):** unified Robux Shop containing Featured Robux Slime Eggs (`Enchanted Egg [New!]`, `Rainbow Egg [LIMITED]` — Robux-only, not purchasable with Cash), permanent Game Passes (`x2 Luck`, `x2 Cash`, `VIP`), Robux Gem Packs (`100 / 550 / 1,200 / 2,600 Gems`), and the one-time Free Bonus Slime Gift card.
+  2. **Upgrades (`⬆️`, left side):** 3 switchable tabs — each with its own dedicated glossy Tab Header Banner instead of stacked sections:
+     - **`⚡ Power & Training`**: Throw Power (`power_upgrade`: **Buy** + **Buy Max**), Pull-Up Bar Tier (`pullup_tier`), and `x2 Training Power` (`boost_double_power`).
+     - **`🥕 Bait & Plot`**: Jelly Bait Quality Tier (`bait_tier`), `+4 Slime Slots` (`slot_expansion`, `$5K`), and `x2 Cash` (`boost_double_cash`).
+     - **`💎 Gem Upgrades`**: `Auto-Throw` (`gem_auto_throw`), `Lucky Charm` (`gem_lucky_charm`), and `+4 Slime Slots` (`gem_slot_expansion`).
+  3. **Rewards (`🎁`, right side):** 7-day manual daily reward calendar plus 12-step linear Quest Line and 3 Daily Quests.
 
 ## HUD layout
-- Left column (top to bottom): **Index**, **Shop** (Cash), **Upgrades** (🥕 / 💎)
-- Right column: **Rewards** (🎁, red "!" badge when something can be claimed), **Robux Store** (R$), **Slimes**
-- Only one window open at a time (same as today: the nav handler closes the others, then `UiKit.ToggleModalAnimated`).
+- Left column (3 buttons, top to bottom): **Index** (`📘`), **Shop** (`R$`, Robux Shop), **Upgrades** (`⬆️`)
+- Right column (2 buttons, top to bottom): **Rewards** (`🎁`, red `"!"` badge when something can be claimed), **Slimes** (3D Slime icon)
+- Only one window open at a time (the nav handler closes the others, then `UiKit.ToggleModalAnimated`).
 
 To keep `HudController.client.luau` (1,300 lines) from growing, each new window goes in its own ModuleScript under `src/StarterPlayer/StarterPlayerScripts/HudWindows/` (`UpgradesWindow.luau`, `RobuxStoreWindow.luau`, `RewardsWindow.luau`). Each exports `Build(parent, ctx) -> { Frame, Refresh(state) }`, and `ctx` carries `buyShopItem`, `bindShopLabel`, the modal scrim and the remotes. HudController creates the nav buttons, keeps the "one window open" rule, and calls each `Refresh(currentState)` on every `PlayerStateSync`.
 

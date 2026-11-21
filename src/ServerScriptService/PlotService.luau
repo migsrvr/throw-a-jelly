@@ -18,6 +18,7 @@ local RunService = game:GetService("RunService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared:WaitForChild("GameConfig"))
 local ProgressionLogic = require(Shared:WaitForChild("ProgressionLogic"))
+local QuestLogic = require(Shared:WaitForChild("QuestLogic"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local SlimeFactory = require(Shared:WaitForChild("SlimeFactory"))
 
@@ -76,7 +77,7 @@ local function updateCollectBillboard(plot: Model, pendingCash: number)
 			if child.Text == "COLLECT" or string.find(child.Text, "COLLECT") then
 				child.Text = "COLLECT"
 			else
-				child.Text = `$${GameConfig.FormatNumber(math.floor(pendingCash))}`
+				child.Text = `${GameConfig.FormatNumber(math.floor(pendingCash))}`
 			end
 		end
 	end
@@ -87,7 +88,7 @@ local function updateOwnerIncomeBillboard(plot: Model, incomePerSec: number)
 	local incomeBb = ownerSign and ownerSign:FindFirstChild("IncomeBillboard")
 	local line1 = incomeBb and incomeBb:FindFirstChild("Line1") :: TextLabel?
 	if line1 then
-		line1.Text = `$${GameConfig.FormatNumber(incomePerSec)}/s`
+		line1.Text = `${GameConfig.FormatNumber(incomePerSec)}/s`
 	end
 end
 
@@ -96,7 +97,6 @@ local function updatePullUpBillboard(plot: Model, tierIndex: number)
 	local bar = pullUp and pullUp:FindFirstChild("Bar")
 	local bb = bar and bar:FindFirstChild("Billboard")
 	local tierDef = GameConfig.PullUpTiers[tierIndex] or GameConfig.PullUpTiers[1]
-	local nextTier = GameConfig.PullUpTiers[tierIndex + 1]
 	if bb then
 		local l1 = bb:FindFirstChild("Line1") :: TextLabel?
 		local l2 = bb:FindFirstChild("Line2") :: TextLabel?
@@ -105,7 +105,7 @@ local function updatePullUpBillboard(plot: Model, tierIndex: number)
 			l1.Text = tierDef.Name
 		end
 		if l2 then
-			l2.Text = if nextTier then `Upgrade: $${GameConfig.FormatNumber(nextTier.Cost)}` else "MAX TIER"
+			l2.Text = "Walk under the bar to train"
 			l2.TextColor3 = Color3.fromRGB(255, 225, 75)
 		end
 		if l3 then
@@ -123,7 +123,7 @@ local function updateUpgradeSign(plot: Model, maxSlimes: number)
 		if maxSlimes >= GameConfig.Slots.ExpandedMaxSlimes then
 			txt.Text = "MAX SLOTS\n<font color='#7CFF7C'>12 / 12</font>"
 		else
-			txt.Text = `8 > 12\n<font color='#7CFF7C'>$${GameConfig.FormatNumber(GameConfig.Slots.ExpansionCost)}</font>`
+			txt.Text = `8 > 12\n<font color='#7CFF7C'>${GameConfig.FormatNumber(GameConfig.Slots.ExpansionCost)}</font>`
 		end
 	end
 end
@@ -168,7 +168,7 @@ function PlotService.RefreshPlotVisuals(plot: Model, profile: ProgressionLogic.P
 					prompt.ActionText = if profile and #profile.UnplacedSlimes > 0
 						then "Swap / Pick Up Slime"
 						else "Pick Up Slime"
-					prompt.ObjectText = `{inst.Name} ($${GameConfig.FormatNumber(inst.IncomePerSec)}/s)`
+					prompt.ObjectText = `{inst.Name} (${GameConfig.FormatNumber(inst.IncomePerSec)}/s)`
 				else
 					prompt.ActionText = "Place Slime"
 					prompt.ObjectText = `Slot #{slotIdx}`
@@ -192,6 +192,23 @@ function PlotService.RefreshPlotVisuals(plot: Model, profile: ProgressionLogic.P
 	local income = if profile then ProgressionLogic.GetIncomePerSecond(profile) else 0
 	local pending = if profile then profile.PendingIncome else 0
 	local pullTier = if profile then profile.PullUpTier else 1
+
+	local pullUp = plot:FindFirstChild("PullUpBar")
+	local bar = pullUp and pullUp:FindFirstChild("Bar")
+	local barPrompt = bar and bar:FindFirstChildOfClass("ProximityPrompt")
+	if barPrompt then
+		local curTier = GameConfig.PullUpTiers[pullTier] or GameConfig.PullUpTiers[1]
+		local nextTier = GameConfig.PullUpTiers[pullTier + 1]
+		if nextTier then
+			barPrompt.Enabled = true
+			barPrompt.ActionText = "Upgrade Bar"
+			barPrompt.ObjectText = `{nextTier.Name} (${GameConfig.FormatNumber(nextTier.Cost)})`
+		else
+			barPrompt.Enabled = false
+			barPrompt.ActionText = "MAX TIER"
+			barPrompt.ObjectText = curTier.Name
+		end
+	end
 
 	updateOwnerIncomeBillboard(plot, income)
 	updateCollectBillboard(plot, pending)
@@ -251,7 +268,7 @@ local function createHold(root: BasePart, hangCf: CFrame): { Instance }
 end
 
 local training: { [Player]: TrainingSession } = {}
-local toggleCooldowns: { [Player]: number } = {}
+local barArmed: { [Player]: boolean } = {}
 local bonusIdCounter = 0
 local bonusRng = Random.new()
 
@@ -312,6 +329,7 @@ local function stopTraining(player: Player, reason: string?)
 		return
 	end
 	training[player] = nil
+	barArmed[player] = false
 
 	for _, inst in session.Hold do
 		inst:Destroy()
@@ -381,17 +399,34 @@ local function startTraining(player: Player, plot: Model, bar: BasePart)
 	})
 end
 
-local function toggleTraining(player: Player, plot: Model, bar: BasePart)
-	local now = os.clock()
-	if toggleCooldowns[player] and now - toggleCooldowns[player] < 0.3 then
-		return
-	end
-	toggleCooldowns[player] = now
-
-	if training[player] then
-		stopTraining(player, "toggle")
-	else
-		startTraining(player, plot, bar)
+-- Step-on auto-start check (called every 0.2s). Starts training when the plot owner is armed and walks
+-- within AutoStartRadius of TrainSpot (or Bar). Re-arms only after walking out past RearmRadius.
+local function checkAutoStartTraining()
+	for player in PlayerStateService.GetAllProfiles() do
+		local char = player.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+		local plot = PlotService.GetPlayerPlot(player)
+		local pullUp = plot and plot:FindFirstChild("PullUpBar")
+		local bar = pullUp and pullUp:FindFirstChild("Bar") :: BasePart?
+		local trainSpot = pullUp and pullUp:FindFirstChild("TrainSpot") :: BasePart?
+		if not root or not hum or hum.Health <= 0 or not plot or not bar then
+			continue
+		end
+		local anchorPos = if trainSpot and trainSpot:IsA("BasePart") then trainSpot.Position else bar.Position
+		local delta = root.Position - anchorPos
+		local flatDist = Vector3.new(delta.X, 0, delta.Z).Magnitude
+		if training[player] == nil then
+			if barArmed[player] == false then
+				if flatDist >= GameConfig.PullUp.RearmRadius then
+					barArmed[player] = true
+				end
+			else
+				if flatDist <= GameConfig.PullUp.AutoStartRadius then
+					startTraining(player, plot, bar)
+				end
+			end
+		end
 	end
 end
 
@@ -502,7 +537,7 @@ local function collectPlotCash(player: Player, plot: Model?)
 	end
 	local collected = ProgressionLogic.CollectPendingIncome(profile)
 	if collected > 0 then
-		PlayerStateService.Toast(player, `+$${GameConfig.FormatNumber(collected)} Cash!`, "cash")
+		PlayerStateService.Toast(player, `+${GameConfig.FormatNumber(collected)} Cash!`, "cash")
 		PlayerStateService.Sync(player)
 		local targetPlot = plot or PlotService.GetPlayerPlot(player)
 		if targetPlot then
@@ -512,7 +547,7 @@ local function collectPlotCash(player: Player, plot: Model?)
 end
 
 local function wirePlotInteractions(plot: Model)
-	-- 1. PullUpBar prompt
+	-- 1. PullUpBar prompt (Upgrade Bar; training itself auto-starts when stepping under the bar)
 	local pullUp = plot:FindFirstChild("PullUpBar")
 	local bar = pullUp and pullUp:FindFirstChild("Bar")
 	if bar and bar:IsA("BasePart") then
@@ -521,14 +556,21 @@ local function wirePlotInteractions(plot: Model)
 			prompt = Instance.new("ProximityPrompt")
 			prompt.Parent = bar
 		end
-		prompt.ActionText = "Start Training"
-		prompt.ObjectText = "Pull-Up Bar"
+		local nextTier = GameConfig.PullUpTiers[2]
+		prompt.ActionText = "Upgrade Bar"
+		prompt.ObjectText = if nextTier
+			then `{nextTier.Name} (${GameConfig.FormatNumber(nextTier.Cost)})`
+			else "Pull-Up Bar"
 		prompt.KeyboardKeyCode = Enum.KeyCode.E
 		prompt.HoldDuration = 0
 		prompt.MaxActivationDistance = 14
 		prompt.RequiresLineOfSight = false
 		prompt.Triggered:Connect(function(triggerPlayer: Player)
-			toggleTraining(triggerPlayer, plot, bar)
+			if getPlotOwner(plot) ~= triggerPlayer then
+				PlayerStateService.Toast(triggerPlayer, "That's another player's pull-up bar!", "warn")
+				return
+			end
+			PlayerStateService.Purchase(triggerPlayer, "pullup_tier", 1)
 		end)
 	end
 
@@ -591,7 +633,7 @@ local function wirePlotInteractions(plot: Model)
 			prompt = Instance.new("ProximityPrompt")
 			prompt.Parent = standPart
 		end
-		prompt.ActionText = `+4 Slime Slots ($${GameConfig.FormatNumber(GameConfig.Slots.ExpansionCost)})`
+		prompt.ActionText = `+4 Slime Slots (${GameConfig.FormatNumber(GameConfig.Slots.ExpansionCost)})`
 		prompt.ObjectText = "Plot Capacity (8 -> 12)"
 		prompt.HoldDuration = 0
 		prompt.MaxActivationDistance = 12
@@ -692,13 +734,13 @@ local function updateHubLeaderboards()
 	fillBoard("MOSTMONEY", function(a, b)
 		return a.Cash > b.Cash
 	end, function(e)
-		return `$${GameConfig.FormatNumber(e.Cash)}`
+		return `${GameConfig.FormatNumber(e.Cash)}`
 	end)
 
 	fillBoard("BESTS", function(a, b)
 		return a.Income > b.Income
 	end, function(e)
-		return `$${GameConfig.FormatNumber(e.Income)}/s`
+		return `${GameConfig.FormatNumber(e.Income)}/s`
 	end)
 
 	fillBoard("THROWPOWER", function(a, b)
@@ -766,7 +808,7 @@ function PlotService.Init()
 
 	Players.PlayerRemoving:Connect(function(player: Player)
 		training[player] = nil
-		toggleCooldowns[player] = nil
+		barArmed[player] = nil
 		collectCooldowns[player] = nil
 	end)
 
@@ -789,6 +831,7 @@ function PlotService.Init()
 				local rate = ProgressionLogic.GetIncomePerSecond(profile)
 				if rate > 0 then
 					profile.Cash += rate
+					QuestLogic.RecordEvent(profile, "EarnCash", rate)
 					PlayerStateService.Sync(player)
 				end
 				local plot = PlotService.GetPlayerPlot(player)
@@ -801,8 +844,14 @@ function PlotService.Init()
 	end)
 
 	local accum = 0
+	local autoTrainAccum = 0
 	RunService.Heartbeat:Connect(function(dt: number)
 		stepTraining()
+		autoTrainAccum += dt
+		if autoTrainAccum >= 0.2 then
+			autoTrainAccum = 0
+			checkAutoStartTraining()
+		end
 		accum += dt
 		for _, slotsMap in plotSlotModels do
 			for _, slimeModel in slotsMap do

@@ -87,6 +87,7 @@ require("./ThrowPhysics.spec")(harness)
 require("./ProgressionLogic.spec")(harness)
 require("./PullUpMotion.spec")(harness)
 require("./Gems.spec")(harness)
+require("./Quests.spec")(harness)
 require("./ProfileSerializer.spec")(harness)
 
 print("\n----------------------------------------")

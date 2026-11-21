@@ -382,15 +382,27 @@ return function(t: any)
 			end
 		end)
 
-		it("hatches eggs x1 / x3 and claims the free gift through Purchase", function()
+		it("rejects Cash purchases on Robux-only Eggs, hatches Robux Eggs via GrantRobuxEgg, and claims the free gift", function()
 			local p = ProgressionLogic.CreateInitialProfile()
 			p.Cash = 1e6
-			local ok1, _, h1 = ProgressionLogic.Purchase(p, "egg_enchanted", 1)
+			-- Featured Eggs are Robux-only and must not be purchasable with Cash ($)
+			local okCash1 = ProgressionLogic.Purchase(p, "egg_enchanted", 1)
+			expect(okCash1).toBe(false)
+			expect(p.Cash).toBe(1e6)
+
+			local ok1, _, h1 = ProgressionLogic.GrantRobuxEgg(p, "enchanted_egg", 1, "rcpt_egg_1")
 			expect(ok1).toBe(true)
 			expect(#h1).toBe(1)
-			local ok3, _, h3 = ProgressionLogic.Purchase(p, "egg_enchanted", 3)
+			expect(p.Cash).toBe(1e6) -- no Cash deducted
+
+			-- Duplicate receipt must be rejected
+			local okDup = ProgressionLogic.GrantRobuxEgg(p, "enchanted_egg", 1, "rcpt_egg_1")
+			expect(okDup).toBe(false)
+
+			local ok3, _, h3 = ProgressionLogic.GrantRobuxEgg(p, "enchanted_egg", 3, "rcpt_egg_3")
 			expect(ok3).toBe(true)
 			expect(#h3).toBe(3)
+
 			local okGift, _, gift = ProgressionLogic.Purchase(p, "free_gift")
 			expect(okGift).toBe(true)
 			expect(#gift).toBe(1)

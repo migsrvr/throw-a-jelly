@@ -17,6 +17,15 @@ The server sends the whole player state to the client every time something chang
 | Index milestones already paid (0-5) | `IndexMilestonesClaimed` | 1 |
 | Highest zone a throw has landed in (0 = never thrown) | `HighestZoneReached` | 2 |
 | Daily login streak in days (0 = never claimed) | `DailyStreak` | 3 |
+| Can the player claim today's daily login reward right now | `DailyCanClaim` | true |
+| Which streak day (1-7+) today's claim will pay | `DailyNextDay` | 4 |
+| Will claiming today reset a broken streak back to Day 1 | `DailyWillReset` | false |
+| Seconds until the next UTC day (daily reward & daily quests reset) | `SecondsUntilNextDay` | 34210 |
+| Current step in the linear Quest Line (1-12, or 13 when complete) | `QuestLineStep` | 3 |
+| Progress toward the current Quest Line step | `QuestLineProgress` | 6 |
+| UTC day number for the current Daily Quests | `DailyQuestDay` | 20780 |
+| Today's 3 Daily Quests (`{ { Id, Progress, Claimed } }`) | `DailyQuests` | see `GameConfig.Quests.DailyPool` |
+| Owned Robux Game Passes (`true` by pass id, checked live from Roblox) | `OwnedPasses` | `pass_x2_luck = true` |
 | Is this session being saved (false = load failed or Studio without API access) | `ProgressSaved` | true |
 | Strength used by the throw (after boosts and equipped slime) | `EffectiveThrowPower` | 96 |
 | Raw strength gained from training | `BaseThrowPower` | 80 |
@@ -88,9 +97,11 @@ The UI asks, the server decides. A refused request does nothing except send back
 | Teleport to throw line or plot | `RequestTeleport` | "ThrowLine" or "Plot" | no button exists yet |
 | Throw | `RequestThrow` | meter value 0-1, and `Auto = true` for Auto-Throw | sent automatically by the throw animation; auto throws need the `auto_throw` boost and always use the fixed Auto-Throw meter value |
 | Stop pull-up training | `RequestStopTraining` | nothing | also happens on jump/walk |
+| Claim a Bonus Rep during pull-up training | `RequestBonusRep` | `{ Id = number }` | must match the server's currently active `TrainingBonus` offer id within its window |
+| Claim today's daily login reward | `RequestClaimDaily` | nothing | manual claim from the 7-day calendar in `RewardsWindow` |
+| Claim a completed quest | `RequestClaimQuest` | `{ Kind = "Line" \| "Daily", Index = number? }` | advances `QuestLineStep` or marks `DailyQuests[Index].Claimed = true` and pays Cash/Gems |
 
-Starting and stopping training itself is the **E key / interaction prompt on the bar** (the game's built-in
-prompt system), not a request the UI sends. A custom on-screen button would need the programmer to add one.
+Pull-up training starts automatically when the plot owner walks within `GameConfig.PullUp.AutoStartRadius` (6 studs) of their bar's `TrainSpot`, and re-arms after walking out past `RearmRadius` (9 studs). The bar's **E key / ProximityPrompt** upgrades the pull-up bar tier (`pullup_tier`).
 
 ## 4. Things the game tells the UI (events)
 

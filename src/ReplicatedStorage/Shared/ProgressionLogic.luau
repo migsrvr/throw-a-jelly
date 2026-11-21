@@ -15,6 +15,9 @@
 local GameConfig = if typeof(script) == "Instance"
 	then require(script.Parent:WaitForChild("GameConfig"))
 	else require("./GameConfig")
+local QuestLogic = if typeof(script) == "Instance"
+	then require(script.Parent:WaitForChild("QuestLogic"))
+	else require("./QuestLogic")
 
 local ProgressionLogic = {}
 
@@ -58,6 +61,12 @@ export type PlayerProfile = {
 	HighestZoneReached: number, -- highest zone a throw has landed in (0 = never thrown); pays FirstZoneReach
 	DailyStreak: number, -- consecutive daily-reward days (0 = never claimed)
 	LastDailyClaimDay: number, -- UTC day number (os.time() // SecondsPerDay) of the last daily claim; -1 = never
+	QuestLineStep: number, -- current 1-based step in GameConfig.Quests.Line
+	QuestLineProgress: number, -- progress toward current QuestLineStep
+	DailyQuestDay: number, -- UTC day number for DailyQuests
+	DailyQuests: { QuestLogic.DailyQuestSlot }, -- today's 3 daily quests
+	ProcessedReceipts: { string }, -- capped recent Developer Product PurchaseIds (saved to DataStore)
+	OwnedPasses: { [string]: boolean }, -- runtime-only Game Pass ownership map (not saved to DataStore)
 }
 
 export type GemAward = {
@@ -163,6 +172,12 @@ function ProgressionLogic.CreateInitialProfile(): PlayerProfile
 		HighestZoneReached = 0,
 		DailyStreak = 0,
 		LastDailyClaimDay = -1,
+		QuestLineStep = 1,
+		QuestLineProgress = 0,
+		DailyQuestDay = -1,
+		DailyQuests = {},
+		ProcessedReceipts = {},
+		OwnedPasses = {},
 	}
 	local starter = makeSlimeInstance(profile, "meadow_sprout", "NORMAL")
 	profile.PlacedSlimesBySlot[1] = starter
@@ -248,6 +263,32 @@ function ProgressionLogic.GetDayNumber(unixSeconds: number): number
 	return math.floor(unixSeconds / GameConfig.Gems.SecondsPerDay)
 end
 
+-- Pure status check for the 7-day Daily Reward calendar UI.
+function ProgressionLogic.GetDailyStatus(
+	profile: PlayerProfile,
+	dayNumber: number
+): { CanClaim: boolean, NextStreakDay: number, WillReset: boolean }
+	if profile.LastDailyClaimDay == dayNumber then
+		return {
+			CanClaim = false,
+			NextStreakDay = math.max(1, profile.DailyStreak),
+			WillReset = false,
+		}
+	elseif profile.LastDailyClaimDay >= 0 and dayNumber == profile.LastDailyClaimDay + 1 then
+		return {
+			CanClaim = true,
+			NextStreakDay = profile.DailyStreak + 1,
+			WillReset = false,
+		}
+	else
+		return {
+			CanClaim = true,
+			NextStreakDay = 1,
+			WillReset = profile.DailyStreak > 0,
+		}
+	end
+end
+
 -- Daily login reward. `dayNumber` is ProgressionLogic.GetDayNumber(os.time()), passed in so this stays pure.
 -- Returns (claimed, gemsPaid, streakDay). Claiming on the day after the last claim continues the streak;
 -- any longer gap restarts it at day 1.
@@ -267,14 +308,58 @@ function ProgressionLogic.ClaimDailyReward(profile: PlayerProfile, dayNumber: nu
 	return true, gems, profile.DailyStreak
 end
 
--- Product of every owned boost's LuckMultiplier (e.g. Lucky Charm x1.5). Applied to every throw.
-function ProgressionLogic.GetBoostLuckMultiplier(profile: { OwnedBoosts: { [string]: boolean }? }): number
+-- Grants a Robux Gem Pack once per unique PurchaseId, keeping a capped dedupe history on the profile.
+function ProgressionLogic.GrantRobuxGemPack(
+	profile: PlayerProfile,
+	packId: string,
+	purchaseId: string
+): (boolean, number, string)
+	local pack = GameConfig.RobuxGemPacksById[packId]
+	if not pack or type(purchaseId) ~= "string" or purchaseId == "" then
+		return false, 0, "Invalid Robux pack or receipt"
+	end
+	profile.ProcessedReceipts = profile.ProcessedReceipts or {}
+	if table.find(profile.ProcessedReceipts, purchaseId) then
+		return false, 0, "Receipt already processed"
+	end
+	table.insert(profile.ProcessedReceipts, purchaseId)
+	while #profile.ProcessedReceipts > GameConfig.Robux.MaxProcessedReceipts do
+		table.remove(profile.ProcessedReceipts, 1)
+	end
+	profile.Gems += pack.Gems
+	return true, pack.Gems, `Purchased {pack.Name} (+{GameConfig.FormatNumber(pack.Gems)} Gems)!`
+end
+
+-- Product of every owned boost's LuckMultiplier (e.g. Lucky Charm x1.5) and Robux Pass LuckMultiplier.
+function ProgressionLogic.GetBoostLuckMultiplier(
+	profile: { OwnedBoosts: { [string]: boolean }?, OwnedPasses: { [string]: boolean }? }
+): number
 	local mult = 1.0
 	local owned = profile.OwnedBoosts or {}
 	for boostId, has in owned do
 		local boost = GameConfig.ShopBoosts[boostId]
 		if has and boost and boost.LuckMultiplier then
 			mult *= boost.LuckMultiplier
+		end
+	end
+	local passes = profile.OwnedPasses or {}
+	for passId, has in passes do
+		local pass = GameConfig.RobuxPassesById[passId]
+		if has and pass and pass.LuckMultiplier then
+			mult *= pass.LuckMultiplier
+		end
+	end
+	return mult
+end
+
+-- Product of every owned Robux Pass CashMultiplier (e.g. x2 Cash pass = 2.0, VIP = 1.1).
+function ProgressionLogic.GetPassCashMultiplier(profile: { OwnedPasses: { [string]: boolean }? }): number
+	local mult = 1.0
+	local passes = profile.OwnedPasses or {}
+	for passId, has in passes do
+		local pass = GameConfig.RobuxPassesById[passId]
+		if has and pass and pass.CashMultiplier then
+			mult *= pass.CashMultiplier
 		end
 	end
 	return mult
@@ -331,8 +416,9 @@ function ProgressionLogic.GetIncomePerSecond(profile: PlayerProfile): number
 	end
 
 	local cashBoost = if profile.OwnedBoosts.double_cash then 2.0 else 1.0
+	local passCash = ProgressionLogic.GetPassCashMultiplier(profile)
 	local trailMult = ProgressionLogic.GetTrailMultiplier(profile, "Cash")
-	return math.floor(total * cashBoost * trailMult + 0.5)
+	return math.floor(total * cashBoost * passCash * trailMult + 0.5)
 end
 
 function ProgressionLogic.GetRarestSlimeDef(profile: PlayerProfile): GameConfig.SlimeDef
@@ -370,6 +456,11 @@ function ProgressionLogic.ApplyPullUpRep(profile: PlayerProfile, repMultiplier: 
 	local powerGained = levels * GameConfig.Training.PowerPerLevel
 	profile.BaseThrowPower += powerGained
 
+	QuestLogic.RecordEvent(profile, "PullUpRep", 1)
+	if (repMultiplier or 1) > 1 then
+		QuestLogic.RecordEvent(profile, "BonusRep", 1)
+	end
+
 	return {
 		XPGained = xpGained,
 		LevelsGained = levels,
@@ -386,10 +477,11 @@ function ProgressionLogic.PurchaseBaitTier(profile: PlayerProfile): (boolean, st
 		return false, "Your Jelly Bait is already at Max Tier!"
 	end
 	if profile.Cash < nextTier.Cost then
-		return false, `Need $${GameConfig.FormatNumber(nextTier.Cost)} Cash`
+		return false, `Need ${GameConfig.FormatNumber(nextTier.Cost)} Cash`
 	end
 	profile.Cash -= nextTier.Cost
 	profile.BaitTier += 1
+	QuestLogic.RecordEvent(profile, "BuyBait", profile.BaitTier, { BaitTier = profile.BaitTier })
 	return true, `Unlocked {nextTier.Name} ({nextTier.LuckMultiplier}x Luck)!`
 end
 
@@ -400,7 +492,7 @@ end
 function ProgressionLogic.PurchasePowerUpgrade(profile: PlayerProfile): (boolean, string)
 	local cost = GameConfig.GetPowerUpgradeCost(profile.PowerUpgradeLevel)
 	if profile.Cash < cost then
-		return false, `Need $${GameConfig.FormatNumber(cost)} Cash`
+		return false, `Need ${GameConfig.FormatNumber(cost)} Cash`
 	end
 	profile.Cash -= cost
 	profile.PowerUpgradeLevel += 1
@@ -414,7 +506,7 @@ function ProgressionLogic.PurchasePullUpTier(profile: PlayerProfile): (boolean, 
 		return false, "Pull-Up Bar is already at Max Tier!"
 	end
 	if profile.Cash < nextTier.Cost then
-		return false, `Need $${GameConfig.FormatNumber(nextTier.Cost)} Cash`
+		return false, `Need ${GameConfig.FormatNumber(nextTier.Cost)} Cash`
 	end
 	profile.Cash -= nextTier.Cost
 	profile.PullUpTier = nextTierIndex
@@ -497,8 +589,9 @@ function ProgressionLogic.EvaluateThrowReward(
 	local zone = GameConfig.Zones[landedZoneIndex] or GameConfig.Zones[1]
 	local cleanDist = math.max(1, distance)
 	local cashBoost = if profile.OwnedBoosts.double_cash then 2.0 else 1.0
+	local passCash = ProgressionLogic.GetPassCashMultiplier(profile)
 	local trailMult = ProgressionLogic.GetTrailMultiplier(profile, "Cash")
-	local cashEarned = math.max(5, math.floor(cleanDist * zone.CashPerStud * cashBoost * trailMult + 0.5))
+	local cashEarned = math.max(5, math.floor(cleanDist * zone.CashPerStud * cashBoost * passCash * trailMult + 0.5))
 	profile.Cash += cashEarned
 	profile.TotalThrows += 1
 
@@ -556,6 +649,12 @@ function ProgressionLogic.EvaluateThrowReward(
 
 	syncLegacyArrays(profile)
 
+	QuestLogic.RecordEvent(profile, "Throw", 1)
+	QuestLogic.RecordEvent(profile, "EarnCash", cashEarned)
+	QuestLogic.RecordEvent(profile, "CatchRarity", 1, { RarityRank = caughtDef.RarityRank })
+	QuestLogic.RecordEvent(profile, "ReachZone", zone.Index, { ZoneIndex = zone.Index })
+	QuestLogic.RecordEvent(profile, "Discover", countDiscovered(profile), { DiscoveredCount = countDiscovered(profile) })
+
 	return {
 		CashEarned = cashEarned,
 		CaughtSlimeId = caughtDef.Id,
@@ -598,7 +697,8 @@ function ProgressionLogic.PlaceSlimeAtSlot(profile: PlayerProfile, slimeUid: str
 	end
 	profile.PlacedSlimesBySlot[slot] = foundInst
 	syncLegacyArrays(profile)
-	return true, `Placed {foundInst.Name} (+$${GameConfig.FormatNumber(foundInst.IncomePerSec)}/s)!`
+	QuestLogic.RecordEvent(profile, "PlaceSlime", 1)
+	return true, `Placed {foundInst.Name} (+${GameConfig.FormatNumber(foundInst.IncomePerSec)}/s)!`
 end
 
 function ProgressionLogic.PickupSlimeFromSlot(profile: PlayerProfile, slotIndex: number): (boolean, string)
@@ -660,7 +760,8 @@ function ProgressionLogic.ClaimFreeGiftSlime(profile: PlayerProfile): (boolean, 
 	table.insert(profile.UnplacedSlimes, inst)
 	syncLegacyArrays(profile)
 	local indexGems = ProgressionLogic.AwardIndexMilestones(profile)
-	return true, `Claimed free {inst.Mutation} {inst.Name} (+$${inst.IncomePerSec}/s)!{milestoneSuffix(indexGems)}`, inst
+	QuestLogic.RecordEvent(profile, "Discover", countDiscovered(profile), { DiscoveredCount = countDiscovered(profile) })
+	return true, `Claimed free {inst.Mutation} {inst.Name} (+${inst.IncomePerSec}/s)!{milestoneSuffix(indexGems)}`, inst
 end
 
 -- Boosts are paid in their own PriceKind (x2 boosts = Cash, Auto-Throw / Lucky Charm = Gems).
@@ -680,6 +781,7 @@ function ProgressionLogic.PurchaseShopBoost(profile: PlayerProfile, boostId: str
 	return true, `Unlocked {boost.Name}!`
 end
 
+-- Hatches 1 or 3 slimes from a Featured Robux Shop Egg (no Cash cost; granted by Robux receipt or direct test).
 function ProgressionLogic.HatchShopEgg(
 	profile: PlayerProfile,
 	eggId: string,
@@ -691,11 +793,6 @@ function ProgressionLogic.HatchShopEgg(
 		return false, "Unknown egg", {}
 	end
 	local num = if count == 3 then 3 else 1
-	local cost = if num == 3 then egg.Buy3Cost else egg.Buy1Cost
-	if profile.Cash < cost then
-		return false, `Need $${GameConfig.FormatNumber(cost)} Cash`, {}
-	end
-	profile.Cash -= cost
 
 	local rng = unitRandomFn or math.random
 	local hatched: { SlimeInstance } = {}
@@ -719,11 +816,36 @@ function ProgressionLogic.HatchShopEgg(
 
 	syncLegacyArrays(profile)
 	local indexGems = ProgressionLogic.AwardIndexMilestones(profile)
+	QuestLogic.RecordEvent(profile, "HatchEgg", num)
+	QuestLogic.RecordEvent(profile, "Discover", countDiscovered(profile), { DiscoveredCount = countDiscovered(profile) })
 	local first = hatched[1]
 	local summary = if num == 1
-		then `Hatched {first.Mutation ~= "NORMAL" and (first.Mutation .. " ") or ""}{first.Name} (+$${first.IncomePerSec}/s)!`
+		then `Hatched {first.Mutation ~= "NORMAL" and (first.Mutation .. " ") or ""}{first.Name} (+${first.IncomePerSec}/s)!`
 		else `Hatched {num}x Slimes from {egg.Name}!`
 	return true, summary .. milestoneSuffix(indexGems), hatched
+end
+
+-- Grants a Robux Featured Egg purchase (1x or 3x) once per unique PurchaseId receipt.
+function ProgressionLogic.GrantRobuxEgg(
+	profile: PlayerProfile,
+	eggId: string,
+	count: number,
+	purchaseId: string,
+	unitRandomFn: (() -> number)?
+): (boolean, string, { SlimeInstance })
+	local egg = GameConfig.ShopEggsById[eggId]
+	if not egg or type(purchaseId) ~= "string" or purchaseId == "" then
+		return false, "Invalid Robux egg or receipt", {}
+	end
+	profile.ProcessedReceipts = profile.ProcessedReceipts or {}
+	if table.find(profile.ProcessedReceipts, purchaseId) then
+		return false, "Receipt already processed", {}
+	end
+	table.insert(profile.ProcessedReceipts, purchaseId)
+	while #profile.ProcessedReceipts > GameConfig.Robux.MaxProcessedReceipts do
+		table.remove(profile.ProcessedReceipts, 1)
+	end
+	return ProgressionLogic.HatchShopEgg(profile, eggId, count, unitRandomFn)
 end
 
 -- ============================================================================
@@ -787,7 +909,13 @@ local function priceText(price: number, kind: GameConfig.PriceKind?): string
 	if price <= 0 then
 		return "FREE"
 	end
-	return if kind == "Gems" then `💎 {GameConfig.FormatNumber(price)}` else `${GameConfig.FormatNumber(price)}`
+	if kind == "Robux" then
+		return `R$ {GameConfig.FormatNumber(price)}`
+	elseif kind == "Gems" then
+		return `💎 {GameConfig.FormatNumber(price)}`
+	else
+		return `${GameConfig.FormatNumber(price)}`
+	end
 end
 
 local function option(quantity: ShopQuantity, label: string, price: number, balance: number): ShopOption
@@ -891,10 +1019,12 @@ local function buildListingEntry(item: GameConfig.ShopCatalogItem, s: ShopStateI
 		if egg then
 			entry.Title = egg.Name
 			entry.Subtitle = egg.Tag
-			setPrice(egg.Buy1Cost)
+			entry.Price = egg.Buy1Robux
+			entry.PriceText = priceText(egg.Buy1Robux, "Robux")
+			entry.State = "Available"
 			entry.Options = {
-				option(1, `Buy x1 ({priceText(egg.Buy1Cost)})`, egg.Buy1Cost, cash),
-				option(3, `Buy x3 ({priceText(egg.Buy3Cost)})`, egg.Buy3Cost, cash),
+				{ Quantity = 1, Label = `Buy x1 ({priceText(egg.Buy1Robux, "Robux")})`, Price = egg.Buy1Robux, CanAfford = true },
+				{ Quantity = 3, Label = `Buy x3 ({priceText(egg.Buy3Robux, "Robux")})`, Price = egg.Buy3Robux, CanAfford = true },
 			}
 		end
 	elseif item.Action == "FreeGift" then
@@ -958,11 +1088,8 @@ function ProgressionLogic.Purchase(profile: PlayerProfile, itemId: string, quant
 			end
 			return true, `Bought {bought}x Power Upgrades (Lv.{profile.PowerUpgradeLevel})!`, bought
 		end
-	elseif item.Action == "Egg" then
-		if qty == 1 or qty == 3 then
-			local ok, msg, hatched = ProgressionLogic.HatchShopEgg(profile, item.Args.EggId or "", qty :: number, nil)
-			return ok, msg, hatched
-		end
+	elseif item.Action == "Egg" or item.PriceKind == "Robux" then
+		return false, "Featured Eggs can only be purchased with Robux!", nil
 	elseif qty == 1 then
 		if item.Action == "PullUpTier" then
 			local ok, msg = ProgressionLogic.PurchasePullUpTier(profile)
@@ -999,6 +1126,7 @@ function ProgressionLogic.CollectPendingIncome(profile: PlayerProfile): number
 	end
 	profile.PendingIncome -= wholeCash
 	profile.Cash += wholeCash
+	QuestLogic.RecordEvent(profile, "EarnCash", wholeCash)
 	return wholeCash
 end
 

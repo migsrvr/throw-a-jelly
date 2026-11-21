@@ -80,6 +80,62 @@ return function(t: any)
 			expect(g3).toBe(daily[1])
 		end)
 
+		it("computes pure daily calendar status (CanClaim, NextStreakDay, WillReset)", function()
+			local p = ProgressionLogic.CreateInitialProfile()
+			local s0 = ProgressionLogic.GetDailyStatus(p, 100)
+			expect(s0.CanClaim).toBe(true)
+			expect(s0.NextStreakDay).toBe(1)
+			expect(s0.WillReset).toBe(false)
+
+			ProgressionLogic.ClaimDailyReward(p, 100)
+			local sSame = ProgressionLogic.GetDailyStatus(p, 100)
+			expect(sSame.CanClaim).toBe(false)
+			expect(sSame.NextStreakDay).toBe(1)
+
+			local sNext = ProgressionLogic.GetDailyStatus(p, 101)
+			expect(sNext.CanClaim).toBe(true)
+			expect(sNext.NextStreakDay).toBe(2)
+			expect(sNext.WillReset).toBe(false)
+
+			local sGap = ProgressionLogic.GetDailyStatus(p, 105)
+			expect(sGap.CanClaim).toBe(true)
+			expect(sGap.NextStreakDay).toBe(1)
+			expect(sGap.WillReset).toBe(true)
+		end)
+
+		it("grants Robux Gem Packs once per receipt PurchaseId and caps ProcessedReceipts", function()
+			local p = ProgressionLogic.CreateInitialProfile()
+			local pack = GameConfig.Robux.GemPacks[1]
+			local ok1, gems1 = ProgressionLogic.GrantRobuxGemPack(p, pack.Id, "receipt_abc")
+			expect(ok1).toBe(true)
+			expect(gems1).toBe(pack.Gems)
+			expect(p.Gems).toBe(pack.Gems)
+
+			-- Duplicate receipt must be rejected without granting Gems again
+			local okDup, gemsDup = ProgressionLogic.GrantRobuxGemPack(p, pack.Id, "receipt_abc")
+			expect(okDup).toBe(false)
+			expect(gemsDup).toBe(0)
+			expect(p.Gems).toBe(pack.Gems)
+
+			-- Cap ProcessedReceipts at GameConfig.Robux.MaxProcessedReceipts
+			for i = 1, GameConfig.Robux.MaxProcessedReceipts + 5 do
+				ProgressionLogic.GrantRobuxGemPack(p, pack.Id, `r_{i}`)
+			end
+			expect(#p.ProcessedReceipts).toBe(GameConfig.Robux.MaxProcessedReceipts)
+		end)
+
+		it("applies owned Robux Game Passes to Luck and Cash multipliers", function()
+			local p = ProgressionLogic.CreateInitialProfile()
+			expect(ProgressionLogic.GetBoostLuckMultiplier(p)).toBe(1)
+			expect(ProgressionLogic.GetPassCashMultiplier(p)).toBe(1)
+
+			p.OwnedPasses.pass_x2_luck = true
+			p.OwnedPasses.pass_x2_cash = true
+			p.OwnedPasses.pass_vip = true
+			expect(ProgressionLogic.GetBoostLuckMultiplier(p)).toBeNear(2.0)
+			expect(ProgressionLogic.GetPassCashMultiplier(p)).toBeNear(2.2)
+		end)
+
 		it("keeps paying the last daily value after the streak passes the table length", function()
 			local p = ProgressionLogic.CreateInitialProfile()
 			local daily = gemsCfg.DailyRewards

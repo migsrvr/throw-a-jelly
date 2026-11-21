@@ -80,8 +80,8 @@ export type PullUpTierDef = {
 
 export type ShopAction = "PowerUpgrade" | "PullUpTier" | "BaitTier" | "SlotExpansion" | "Boost" | "Egg" | "FreeGift"
 
--- Which wallet a shop item is paid from. "Robux" is reserved for future developer products.
-export type PriceKind = "Cash" | "Gems"
+-- Which wallet a shop item is paid from. Featured Eggs use "Robux" (Developer Products).
+export type PriceKind = "Cash" | "Gems" | "Robux"
 
 export type ShopCatalogItem = {
 	Id: string,
@@ -114,10 +114,65 @@ export type ShopEggDef = {
 	Id: string,
 	Name: string,
 	Tag: string,
-	Buy1Cost: number,
-	Buy3Cost: number,
+	Buy1Robux: number,
+	Buy3Robux: number,
+	Buy1ProductId: number,
+	Buy3ProductId: number,
 	AccentColor: RGB,
 	Items: { ShopEggItem },
+}
+
+export type QuestEventType =
+	"Throw"
+	| "CatchRarity"
+	| "ReachZone"
+	| "PullUpRep"
+	| "BonusRep"
+	| "PerfectThrow"
+	| "PlaceSlime"
+	| "HatchEgg"
+	| "BuyBait"
+	| "Discover"
+	| "EarnCash"
+
+export type QuestReward = {
+	Cash: number?,
+	Gems: number?,
+}
+
+export type QuestDef = {
+	Id: string,
+	Title: string,
+	Event: QuestEventType,
+	Target: number,
+	MinRarityRank: number?,
+	MinZone: number?,
+	MinBaitTier: number?,
+	Reward: QuestReward,
+}
+
+export type RobuxGemPackDef = {
+	Id: string,
+	Name: string,
+	Gems: number,
+	RobuxPrice: number,
+	ProductId: number,
+	Icon: string,
+	Color: RGB,
+	BonusTag: string?,
+}
+
+export type RobuxPassDef = {
+	Id: string,
+	Name: string,
+	Description: string,
+	RobuxPrice: number,
+	PassId: number,
+	Icon: string,
+	Color: RGB,
+	LuckMultiplier: number?,
+	CashMultiplier: number?,
+	ChatTag: string?,
 }
 
 GameConfig.Hub = {
@@ -673,6 +728,8 @@ GameConfig.PullUp = {
 	StrengthLogScale = 0.8,
 	StrengthRef = 5,
 	MaxTrainDistance = 16, -- studs from the bar before training auto-stops
+	AutoStartRadius = 6, -- studs from TrainSpot (or Bar) to auto-start training
+	RearmRadius = 9, -- studs owner must walk out to re-arm auto-start after stopping
 	SyncEveryReps = 5, -- full PlayerStateSync cadence while training (TrainingRep fires every rep)
 
 	-- Exaggerated rep motion (degrees / studs at full intensity; see PullUpMotion.luau)
@@ -714,8 +771,10 @@ GameConfig.ShopEggs = {
 		Id = "enchanted_egg",
 		Name = "ENCHANTED EGG",
 		Tag = "New!",
-		Buy1Cost = 120,
-		Buy3Cost = 320,
+		Buy1Robux = 49,
+		Buy3Robux = 129,
+		Buy1ProductId = 0,
+		Buy3ProductId = 0,
 		AccentColor = { 175, 110, 255 },
 		Items = {
 			{ SlimeId = "meadow_honey", Mutation = "EMERALD", ChancePercent = 40, BonusLabel = "150%" },
@@ -730,8 +789,10 @@ GameConfig.ShopEggs = {
 		Id = "rainbow_egg",
 		Name = "RAINBOW EGG",
 		Tag = "LIMITED",
-		Buy1Cost = 1500,
-		Buy3Cost = 4000,
+		Buy1Robux = 149,
+		Buy3Robux = 399,
+		Buy1ProductId = 0,
+		Buy3ProductId = 0,
 		AccentColor = { 255, 120, 200 },
 		Items = {
 			{ SlimeId = "crystal_prism", Mutation = "RAINBOW", ChancePercent = 45, BonusLabel = "750%" },
@@ -745,8 +806,15 @@ GameConfig.ShopEggs = {
 } :: { ShopEggDef }
 
 GameConfig.ShopEggsById = {} :: { [string]: ShopEggDef }
+GameConfig.RobuxEggsByProductId = {} :: { [number]: { EggId: string, Count: number } }
 for _, egg in GameConfig.ShopEggs do
 	GameConfig.ShopEggsById[egg.Id] = egg
+	if egg.Buy1ProductId > 0 then
+		GameConfig.RobuxEggsByProductId[egg.Buy1ProductId] = { EggId = egg.Id, Count = 1 }
+	end
+	if egg.Buy3ProductId > 0 then
+		GameConfig.RobuxEggsByProductId[egg.Buy3ProductId] = { EggId = egg.Id, Count = 3 }
+	end
 end
 
 GameConfig.ShopBoosts = {
@@ -808,8 +876,8 @@ GameConfig.ShopCatalog = {
 	{ Id = "slot_expansion", Category = "Upgrade", Action = "SlotExpansion", Args = {}, Icon = "🧺", Color = { 95, 200, 120 }, PriceKind = "Cash" },
 	{ Id = "boost_double_cash", Category = "Boost", Action = "Boost", Args = { BoostId = "double_cash" }, Icon = "💵", Color = { 45, 185, 235 }, PriceKind = "Cash" },
 	{ Id = "boost_double_power", Category = "Boost", Action = "Boost", Args = { BoostId = "double_power" }, Icon = "💪", Color = { 165, 95, 245 }, PriceKind = "Cash" },
-	{ Id = "egg_enchanted", Category = "Egg", Action = "Egg", Args = { EggId = "enchanted_egg" }, Icon = "🥚", Color = { 175, 110, 255 }, PriceKind = "Cash" },
-	{ Id = "egg_rainbow", Category = "Egg", Action = "Egg", Args = { EggId = "rainbow_egg" }, Icon = "🌈", Color = { 255, 120, 200 }, PriceKind = "Cash" },
+	{ Id = "egg_enchanted", Category = "Egg", Action = "Egg", Args = { EggId = "enchanted_egg" }, Icon = "🥚", Color = { 175, 110, 255 }, PriceKind = "Robux" },
+	{ Id = "egg_rainbow", Category = "Egg", Action = "Egg", Args = { EggId = "rainbow_egg" }, Icon = "🌈", Color = { 255, 120, 200 }, PriceKind = "Robux" },
 	{ Id = "free_gift", Category = "Gift", Action = "FreeGift", Args = {}, Icon = "🎁", Color = { 255, 205, 55 }, PriceKind = "Cash" },
 	-- Gem items (PriceKind = "Gems": paid from the Gems wallet)
 	{ Id = "gem_auto_throw", Category = "Gem", Action = "Boost", Args = { BoostId = "auto_throw" }, Icon = "🤖", Color = { 80, 210, 230 }, PriceKind = "Gems" },
@@ -820,6 +888,81 @@ GameConfig.ShopCatalog = {
 GameConfig.ShopCatalogById = {} :: { [string]: ShopCatalogItem }
 for _, item in GameConfig.ShopCatalog do
 	GameConfig.ShopCatalogById[item.Id] = item
+end
+
+-- ============================================================================
+-- QUESTS: Linear Quest Line (12 steps) + Daily Quest Pool (3 picked per UTC day)
+-- ============================================================================
+GameConfig.Quests = {
+	DailyCount = 3,
+	Line = {
+		{ Id = "line_throw_1", Title = "Throw Jelly Once", Event = "Throw", Target = 1, Reward = { Cash = 25, Gems = 5 } },
+		{ Id = "line_place_1", Title = "Place a Slime on Your Plot", Event = "PlaceSlime", Target = 1, Reward = { Cash = 50, Gems = 5 } },
+		{ Id = "line_reps_10", Title = "Train 10 Pull-Up Reps", Event = "PullUpRep", Target = 10, Reward = { Cash = 75, Gems = 8 } },
+		{ Id = "line_bonus_1", Title = "Tap a Bonus Rep Pop-Up", Event = "BonusRep", Target = 1, Reward = { Cash = 100, Gems = 10 } },
+		{ Id = "line_bait_2", Title = "Buy Berry Jelly Bait", Event = "BuyBait", Target = 2, MinBaitTier = 2, Reward = { Cash = 150, Gems = 10 } },
+		{ Id = "line_zone_2", Title = "Reach Crystal Cave (Zone 2)", Event = "ReachZone", Target = 2, MinZone = 2, Reward = { Cash = 250, Gems = 15 } },
+		{ Id = "line_discover_5", Title = "Discover 5 Slimes in the Index", Event = "Discover", Target = 5, Reward = { Cash = 400, Gems = 15 } },
+		{ Id = "line_perfect_1", Title = "Land a PERFECT! Throw", Event = "PerfectThrow", Target = 1, Reward = { Cash = 600, Gems = 20 } },
+		{ Id = "line_place_3", Title = "Place 3 Slimes on Your Plot", Event = "PlaceSlime", Target = 3, Reward = { Cash = 1000, Gems = 20 } },
+		{ Id = "line_zone_3", Title = "Reach Lava Fields (Zone 3)", Event = "ReachZone", Target = 3, MinZone = 3, Reward = { Cash = 2000, Gems = 30 } },
+		{ Id = "line_reps_100", Title = "Complete 100 Pull-Up Reps", Event = "PullUpRep", Target = 100, Reward = { Cash = 4000, Gems = 40 } },
+		{ Id = "line_zone_4", Title = "Reach Frost Peaks (Zone 4)", Event = "ReachZone", Target = 4, MinZone = 4, Reward = { Cash = 10000, Gems = 60 } },
+	} :: { QuestDef },
+	DailyPool = {
+		{ Id = "daily_throws_5", Title = "Throw Jelly 5 Times", Event = "Throw", Target = 5, Reward = { Gems = 8 } },
+		{ Id = "daily_throws_15", Title = "Throw Jelly 15 Times", Event = "Throw", Target = 15, Reward = { Gems = 15 } },
+		{ Id = "daily_reps_25", Title = "Do 25 Pull-Up Reps", Event = "PullUpRep", Target = 25, Reward = { Gems = 10 } },
+		{ Id = "daily_bonus_3", Title = "Hit 3 Bonus Rep Pop-Ups", Event = "BonusRep", Target = 3, Reward = { Gems = 12 } },
+		{ Id = "daily_perfect_2", Title = "Land 2 PERFECT! Throws", Event = "PerfectThrow", Target = 2, Reward = { Gems = 15 } },
+		{ Id = "daily_rare_2", Title = "Catch 2 Rare+ Slimes", Event = "CatchRarity", Target = 2, MinRarityRank = 3, Reward = { Gems = 15 } },
+		{ Id = "daily_place_2", Title = "Place 2 Slimes on Your Plot", Event = "PlaceSlime", Target = 2, Reward = { Cash = 300, Gems = 10 } },
+		{ Id = "daily_cash_500", Title = "Earn $500 Cash from Throws", Event = "EarnCash", Target = 500, Reward = { Gems = 10 } },
+	} :: { QuestDef },
+}
+
+GameConfig.QuestsById = {} :: { [string]: QuestDef }
+for _, q in GameConfig.Quests.Line do
+	GameConfig.QuestsById[q.Id] = q
+end
+for _, q in GameConfig.Quests.DailyPool do
+	GameConfig.QuestsById[q.Id] = q
+end
+
+-- ============================================================================
+-- ROBUX STORE: Developer Product Gem Packs & Game Passes (ProductId / PassId = 0 until published)
+-- ============================================================================
+GameConfig.Robux = {
+	MaxProcessedReceipts = 50,
+	GemPacks = {
+		{ Id = "pack_100", Name = "100 Gems", Gems = 100, RobuxPrice = 25, ProductId = 0, Icon = "💎", Color = { 80, 185, 255 } },
+		{ Id = "pack_550", Name = "550 Gems", Gems = 550, RobuxPrice = 99, ProductId = 0, Icon = "💎", Color = { 65, 155, 245 }, BonusTag = "+10% Bonus" },
+		{ Id = "pack_1200", Name = "1,200 Gems", Gems = 1200, RobuxPrice = 199, ProductId = 0, Icon = "💎", Color = { 145, 95, 250 }, BonusTag = "+20% Bonus" },
+		{ Id = "pack_2600", Name = "2,600 Gems", Gems = 2600, RobuxPrice = 399, ProductId = 0, Icon = "💎", Color = { 255, 120, 210 }, BonusTag = "Best Value" },
+	} :: { RobuxGemPackDef },
+	Passes = {
+		{ Id = "pass_x2_luck", Name = "x2 Luck", Description = "Permanent 2x Luck on every throw!", RobuxPrice = 149, PassId = 0, Icon = "🍀", Color = { 85, 225, 115 }, LuckMultiplier = 2.0 },
+		{ Id = "pass_x2_cash", Name = "x2 Cash", Description = "Permanent 2x Cash from slimes & throws!", RobuxPrice = 149, PassId = 0, Icon = "💵", Color = { 55, 190, 250 }, CashMultiplier = 2.0 },
+		{ Id = "pass_vip", Name = "VIP", Description = "+10% Cash income and [VIP] chat tag!", RobuxPrice = 249, PassId = 0, Icon = "👑", Color = { 255, 195, 50 }, CashMultiplier = 1.10, ChatTag = "[VIP]" },
+	} :: { RobuxPassDef },
+}
+
+GameConfig.RobuxGemPacksById = {} :: { [string]: RobuxGemPackDef }
+GameConfig.RobuxGemPacksByProductId = {} :: { [number]: RobuxGemPackDef }
+for _, pack in GameConfig.Robux.GemPacks do
+	GameConfig.RobuxGemPacksById[pack.Id] = pack
+	if pack.ProductId > 0 then
+		GameConfig.RobuxGemPacksByProductId[pack.ProductId] = pack
+	end
+end
+
+GameConfig.RobuxPassesById = {} :: { [string]: RobuxPassDef }
+GameConfig.RobuxPassesByPassId = {} :: { [number]: RobuxPassDef }
+for _, pass in GameConfig.Robux.Passes do
+	GameConfig.RobuxPassesById[pass.Id] = pass
+	if pass.PassId > 0 then
+		GameConfig.RobuxPassesByPassId[pass.PassId] = pass
+	end
 end
 
 function GameConfig.GetPowerUpgradeCost(currentLevel: number): number

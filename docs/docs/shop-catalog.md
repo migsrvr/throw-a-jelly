@@ -60,16 +60,19 @@ Anything else is rejected without charging.
 - **New kind of purchase**: add an `Action` value to `GameConfig.ShopAction`, handle it in `buildListingEntry` and
   `ProgressionLogic.Purchase`, and add a test.
 - **New Gem item**: set `PriceKind = "Gems"` on the catalog row (and `Category = "Gem"` so it shows in the Gem
-  Shop card). Boosts carry their own `PriceKind` in `ShopBoosts`, and a test checks the catalog row matches it.
+  Shop card in `UpgradesWindow`). Boosts carry their own `PriceKind` in `ShopBoosts`, and a test checks the catalog row matches it.
   The listing then reports `PriceKind = "Gems"`, shows `💎 N`, and checks affordability against `Gems`.
-- **Robux later**: a `"Robux"` `PriceKind` would be granted from a `MarketplaceService.ProcessReceipt` handler
-  that calls the same reducers (and must save the profile before returning `PurchaseGranted`).
+- **Robux Gem Packs & Game Passes (`GameConfig.Robux` + `MonetizationService.luau`)**:
+  1. In Roblox Creator Dashboard (or Studio **Game Settings -> Monetization**), create the **Developer Products** for the 4 Gem Packs (`100 / 550 / 1,200 / 2,600 Gems`) and the **Game Passes** (`x2 Luck`, `x2 Cash`, `VIP`).
+  2. Copy each asset ID into `GameConfig.Robux.GemPacks` (`ProductId`) and `GameConfig.Robux.Passes` (`PassId`) in `src/ReplicatedStorage/Shared/GameConfig.luau`.
+  3. Any entry whose ID is `0` automatically shows a disabled `"Coming soon (R$X)"` button in `RobuxStoreWindow.luau`. As soon as a non-zero ID is set, the button turns green (`"R$ X"`), prompts `MarketplaceService`, and `MonetizationService.ProcessReceipt` grants the Gems, records `PurchaseId` in `profile.ProcessedReceipts`, and saves via `DataService.Save` before returning `PurchaseGranted`.
 
 ## Wallets
 
 | `PriceKind` | Paid from | Example items |
 | --- | --- | --- |
-| `Cash` | `profile.Cash` | power upgrade, bars, bait, eggs, x2 boosts, +4 slots ($5K) |
+| `Cash` | `profile.Cash` | power upgrade, bars, bait, x2 boosts, +4 slots ($5K) |
 | `Gems` | `profile.Gems` | Auto-Throw, Lucky Charm, +4 slots (60 Gems) |
+| `Robux` | Roblox Developer Products (`MonetizationService.ProcessReceipt`) | Featured Slime Eggs (`Enchanted Egg [New!]`, `Rainbow Egg [LIMITED]`) |
 
 The +4 slot unlock exists twice (`slot_expansion` for Cash, `gem_slot_expansion` for Gems); buying either one maxes both.

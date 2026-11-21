@@ -22,8 +22,6 @@ Read [GAME-OVERVIEW.md](GAME-OVERVIEW.md) first for context. Exact names, number
   King Slime"). Design for the longest name in [DATA-REFERENCE.md](DATA-REFERENCE.md).
 - **Screen sizes:** the HUD scales to the window (designed around 1366x768, scales between 0.68x and 1.18x).
   **There is no phone-specific layout yet.** Roblox players on phones are a large share, so this needs a decision.
-- **Known text bug (programmer is aware):** some messages show a double dollar sign, such as `$$25`. Do not
-  design around it; it will be fixed in code.
 - **Placeholders you can ignore:** emoji used as icons (🌿 💎 🌋 ❄️ 🍬 💪 💵 ⚡ 🥚 🌈 🎁 📘 🧰) are stand-ins for real icons.
 
 ## Priority order (suggested)
@@ -45,11 +43,12 @@ Read [GAME-OVERVIEW.md](GAME-OVERVIEW.md) first for context. Exact names, number
 
 **Current state.**
 - Top centre: one line of objective text, and under it a short-lived message banner ("toast").
-- Bottom-left: two big numbers, Throw Power (💪, blue) and Cash (💵, green).
+- Bottom-left: three big numbers, Throw Power (💪, blue), Cash (💵, green), and Gems (💎, light blue).
 - Bottom-centre: the hotbar, up to **5 slots** showing slimes the player has caught but not placed yet.
-- Right edge: a "Slimes" button. Left edge: "Index" (top) and "Shop" (below) buttons. Each is a square 78 px bevel button.
+- Left column (3 buttons, top to bottom): **Index** (`📘`), **Shop** (`R$`, Robux Shop), and **Upgrades** (`⬆️`).
+- Right column (2 buttons, top to bottom): **Rewards** (`🎁`, with a red `"!"` badge when the daily reward or any quest is ready to claim) and **Slimes** (3D slime icon). Each is a square 78 px bevel button.
 - A bouncing yellow arrow above the hotbar when the objective is "pick your slime".
-- A dark dim layer behind any open window.
+- A dark dim layer behind any open window (only one window open at a time).
 
 **Information it must show.** Cash, Throw Power, the current objective, the hotbar slimes, and messages.
 
@@ -80,53 +79,29 @@ green border.
 
 ---
 
-## 2. Shop window
+## 2. Shop (Robux), Upgrades (`⬆️`), and Rewards (`🎁`) windows
 
-**What it is.** The place to spend cash. Opened by the left "Shop" button. Players can also trigger a
-single "upgrade power" purchase at the Jelly Shop building in the hub.
+### 2a. Shop (`R$`) window (`HudWindows/RobuxStoreWindow.luau`)
+- Opened by the left **"Shop" (`R$`)** button.
+- Contains:
+  1. **Featured Robux Slime Eggs** (Enchanted Egg `[New!]`, Rainbow Egg `[LIMITED]`): 6 odds tiles with live 3D slime previews, `%` chance, bonus label, and Robux-only **Buy x1 (`R$`)** / **Buy x3 (`R$`)** buttons (`PriceKind = "Robux"`).
+  2. **Permanent Game Passes** (`GameConfig.Robux.Passes`): `x2 Luck`, `x2 Cash`, `VIP`.
+  3. **Robux Gem Packs** (`GameConfig.Robux.GemPacks`): `100 / 550 / 1,200 / 2,600 Gems`.
+  4. **Free Gift card**: 3D preview of Emerald Sakura Slime + **CLAIM!** button.
 
-**Current state.** One scrolling window (650x435) with a purple header, a red X, and three kinds of stacked cards:
-1. One card per **egg** (Enchanted, Rainbow): a name with a tag ("New!", "LIMITED"), a row of six odds tiles,
-   each with a 3D slime preview, the chance (%) and a bonus label, and two buttons "Buy x1" and "Buy x3".
-2. One **upgrades card** with four buttons in a 2x2 grid: Upgrade Power, Upgrade Pull-Up Bar, x2 Cash, x2 Training Power.
-3. One **free gift card**: a 3D slime preview, short text, and a "CLAIM!" button.
+### 2b. Tabbed Upgrades (`⬆️`) window (`HudWindows/UpgradesWindow.luau`)
+- Opened by the left **"Upgrades" (`⬆️`)** button.
+- Header shows `"⬆️ Upgrades"` plus live `💵 $Cash` and `💎 Gems` balance pills.
+- Uses **3 switchable tabs**, each with its own dedicated glossy **Tab Header Banner**:
+  1. **`⚡ Power & Training`**: Throw Power (`power_upgrade`: **Buy** + **Buy Max**), Pull-Up Bar Tier (`pullup_tier`), and `x2 Training Power` (`boost_double_power`).
+  2. **`🥕 Bait & Plot`**: Jelly Bait quality tier (`bait_tier`, showing `Bait Luck Xx -> Yx`), `+4 Slime Slots` (`slot_expansion`, `$5K`), and `x2 Cash` (`boost_double_cash`).
+  3. **`💎 Gem Upgrades`**: every catalog item with `Category = "Gem"` (`gem_auto_throw`, `gem_lucky_charm`, `gem_slot_expansion`).
 
-**Information it must show** (every item, from the shop list in [DATA-REFERENCE.md](DATA-REFERENCE.md)):
-- Item title and a one-line description.
-- Price (or "FREE", "OWNED", "MAX", "CLAIMED").
-- Whether the player can afford it right now.
-- For eggs: every possible slime, its mutation, chance and bonus label.
-- For upgrades: what the player gets (for example the next bar's name and "+8 power per rep, 1.15x faster").
-
-**Actions.** Every purchase is one request: "buy this item, this quantity". Allowed quantities:
-- Power upgrade: **1** or **"Buy Max"** (buys as many as the player can afford).
-- Eggs: **1** or **3**.
-- Everything else: 1.
-The game answers with a message banner. After a purchase the window should update (price goes up, item becomes OWNED).
-
-**States to design (important, this is where most of the visual design work is).**
-
-| Item type | States |
-| --- | --- |
-| Any priced item | can afford / cannot afford (greyed or red price) |
-| Boosts (x2 Cash, x2 Training) | for sale / OWNED |
-| Pull-up bar upgrade | for sale / at MAX TIER |
-| Plot slots (+4) | for sale / already unlocked (MAX) |
-| Free gift | claimable / CLAIMED |
-| Power upgrade | normal / buy-max available |
-| Eggs | normal / LIMITED tag / hatching in progress |
-
-**Missing / wanted.**
-- **Tabs or sections** (Eggs, Upgrades, Boosts, Gifts). The list will grow.
-- A **Buy Max** button. The game supports it, no button exists yet.
-- A **+4 Slime Slots** button. Today it can only be bought at a sign on the plot.
-- **Egg hatch animation** and a result screen. Today the player only gets a message banner and the slime appears in the hotbar.
-- Currency affordance: show how much cash the player has inside the window.
-- A place for **Robux items** later (the shop is built so these can be added).
-- Mobile layout (window is fixed 650x435).
-
-**Source:** `HudController.client.luau` section 6 (and the shop list in `GameConfig.luau`, see
-[shop-catalog.md](shop-catalog.md) for developers).
+### 2c. Rewards & Quests window (`HudWindows/RewardsWindow.luau`)
+- Opened by the right **"Rewards" (`🎁`)** button (shows a red `"!"` badge when `DailyCanClaim` or any quest can be claimed).
+- Two tabs:
+  1. **📅 Daily Rewards**: 7-tile login streak strip on top (`Day 1`..`Day 7` from `GameConfig.Gems.DailyRewards`, ticked claimed days, glowing today tile with **CLAIM!**, dimmed future days, and `"Resets in HHh MMm"` countdown) + **3 Daily Quest cards** below with progress bars and **CLAIM!** buttons.
+  2. **🏆 Quest Line**: large hero card for the current step (`Step X / 12`) with progress bar and **CLAIM!**, plus 2 dimmed preview cards for the upcoming steps.
 
 ---
 
@@ -188,17 +163,15 @@ interaction, "sell" or "lock" if those ever exist.
 
 ---
 
-## 5. Pull-up bar and training (new, least designed)
+## 5. Pull-up bar and training (step-on auto-start + E to upgrade)
 
 **What it is.** The strength-training system. Each player's plot has a pull-up bar.
 
 **Current state.**
-- **World label above the bar** (three lines of text): the bar's name, "Upgrade: $75" (or "MAX TIER"), and
-  "+8 XP / rep".
-- **Interaction prompt** the player can press (default key E): says "Start Training", then "Stop Training".
-- While training: the avatar hangs and does looping pull-ups at the game's speed. A green floating
-  "+8 💪" pops over the head on every rep. When training ends there is a banner "Training done: N reps!".
-- The Throw Power number at the bottom-left updates every few reps (not every rep).
+- **World label above the bar** (three lines of text): the bar's tier name, `"Walk under the bar to train"`, and `"+<XP> XP / rep"`.
+- **Step-on auto-start:** walking within 6 studs (`GameConfig.PullUp.AutoStartRadius`) of your own bar's `TrainSpot` starts training automatically (no key press). Jumping or walking away stops training and disarms the bar until you walk out past 9 studs (`RearmRadius`).
+- **Interaction prompt on the bar (E):** upgrades the bar (`ActionText = "Upgrade Bar"`, `ObjectText = "<Next Tier Name> ($cost)"`, disabled at MAX TIER, hidden on other players' bars).
+- While training: the avatar hangs in a front-camera view with per-rep shake, dust/sweat/ring effects, a bottom XP bar (`Lv. N`, `current / required XP`, `Next: +5 Power`), `"LEVEL UP!"` pop-ups, and server-offered `"⚡ BONUS REP! (3x XP)"` buttons every 4-6 seconds.
 
 **Information it must show** (designer's wish list; nothing of this exists on screen yet):
 - Reps done this session and total.

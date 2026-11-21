@@ -175,8 +175,8 @@ These are the shop's building blocks. A button or card in the shop = one row her
 | slot_expansion | Upgrade | 🧺 | Cash | Adds 4 more slime slots to the plot (8 to 12); the Cash and Gem versions unlock the same slots | #5FC878 |
 | boost_double_cash | Boost | 💵 | Cash | Permanent boost (see boosts below) | #2DB9EB |
 | boost_double_power | Boost | 💪 | Cash | Permanent boost (see boosts below) | #A55FF5 |
-| egg_enchanted | Egg | 🥚 | Cash | Hatches 1 or 3 slimes with the odds listed below | #AF6EFF |
-| egg_rainbow | Egg | 🌈 | Cash | Hatches 1 or 3 slimes with the odds listed below | #FF78C8 |
+| egg_enchanted | Egg | 🥚 | Robux | Hatches 1 or 3 slimes with the odds listed below | #AF6EFF |
+| egg_rainbow | Egg | 🌈 | Robux | Hatches 1 or 3 slimes with the odds listed below | #FF78C8 |
 | free_gift | Gift | 🎁 | Cash | One-time free slime | #FFCD37 |
 | gem_auto_throw | Gem | 🤖 | Gems | Permanent boost (see boosts below) | #50D2E6 |
 | gem_lucky_charm | Gem | 🍀 | Gems | Permanent boost (see boosts below) | #5AE178 |
@@ -193,9 +193,9 @@ All boosts are permanent once bought.
 | Auto-Throw | Throws for you while you stand at the throw line! | 150 Gems | #50D2E6 |
 | Lucky Charm | x1.5 Luck on every throw! | 120 Gems | #5AE178 |
 
-### Eggs
+### Eggs (Robux-only)
 
-**ENCHANTED EGG** (tag: "New!") - $120 for 1, $320 for 3. Accent colour #AF6EFF.
+**ENCHANTED EGG** (tag: "New!") - R$ 49 for 1 (ProductId 0), R$ 129 for 3 (ProductId 0). Accent colour #AF6EFF.
 
 | Slime | Mutation | Chance | Bonus label shown on the card |
 | --- | --- | --- | --- |
@@ -206,7 +206,7 @@ All boosts are permanent once bought.
 | Prism Geode Slime | CRYSTAL | 4% | 550% |
 | Solar Flare Slime | RAINBOW | 1% | 900% |
 
-**RAINBOW EGG** (tag: "LIMITED") - $1.5K for 1, $4.0K for 3. Accent colour #FF78C8.
+**RAINBOW EGG** (tag: "LIMITED") - R$ 149 for 1 (ProductId 0), R$ 399 for 3 (ProductId 0). Accent colour #FF78C8.
 
 | Slime | Mutation | Chance | Bonus label shown on the card |
 | --- | --- | --- | --- |
@@ -254,7 +254,7 @@ A throw that lands in a zone for the first time pays that zone and every zone be
 
 ### Daily login streak
 
-Claimed automatically once per day (UTC) when the player joins or is online at midnight. Missing a day restarts at day 1.
+Claimed manually once per UTC day in the Rewards window (7-day calendar). Missing a day restarts at day 1.
 After day 7 the streak keeps paying the day-7 amount.
 
 | Streak day | Gems |
@@ -282,6 +282,57 @@ A caught slime pays its rarity amount plus its mutation amount. Anything not lis
 
 Once bought, an AUTO toggle appears under the throw meter. While it's on, the player throws by itself after 0.8s at the throw line,
 always stopping the meter in band 5 (+9 power, 1.15x luck), so a PERFECT by hand is still better.
+
+## Quests
+
+### Quest Line (12 steps, linear, never resets)
+
+| Step | Id | Title | Event | Target | Reward |
+| --- | --- | --- | --- | --- | --- |
+| 1 | line_throw_1 | Throw Jelly Once | Throw | 1 | 5 Gems + $25 |
+| 2 | line_place_1 | Place a Slime on Your Plot | PlaceSlime | 1 | 5 Gems + $50 |
+| 3 | line_reps_10 | Train 10 Pull-Up Reps | PullUpRep | 10 | 8 Gems + $75 |
+| 4 | line_bonus_1 | Tap a Bonus Rep Pop-Up | BonusRep | 1 | 10 Gems + $100 |
+| 5 | line_bait_2 | Buy Berry Jelly Bait | BuyBait | 2 | 10 Gems + $150 |
+| 6 | line_zone_2 | Reach Crystal Cave (Zone 2) | ReachZone | 2 | 15 Gems + $250 |
+| 7 | line_discover_5 | Discover 5 Slimes in the Index | Discover | 5 | 15 Gems + $400 |
+| 8 | line_perfect_1 | Land a PERFECT! Throw | PerfectThrow | 1 | 20 Gems + $600 |
+| 9 | line_place_3 | Place 3 Slimes on Your Plot | PlaceSlime | 3 | 20 Gems + $1.0K |
+| 10 | line_zone_3 | Reach Lava Fields (Zone 3) | ReachZone | 3 | 30 Gems + $2.0K |
+| 11 | line_reps_100 | Complete 100 Pull-Up Reps | PullUpRep | 100 | 40 Gems + $4.0K |
+| 12 | line_zone_4 | Reach Frost Peaks (Zone 4) | ReachZone | 4 | 60 Gems + $10.0K |
+
+### Daily Quest Pool (8 templates, 3 picked per UTC day)
+
+| Id | Title | Event | Target | Reward |
+| --- | --- | --- | --- | --- |
+| daily_throws_5 | Throw Jelly 5 Times | Throw | 5 | 8 Gems |
+| daily_throws_15 | Throw Jelly 15 Times | Throw | 15 | 15 Gems |
+| daily_reps_25 | Do 25 Pull-Up Reps | PullUpRep | 25 | 10 Gems |
+| daily_bonus_3 | Hit 3 Bonus Rep Pop-Ups | BonusRep | 3 | 12 Gems |
+| daily_perfect_2 | Land 2 PERFECT! Throws | PerfectThrow | 2 | 15 Gems |
+| daily_rare_2 | Catch 2 Rare+ Slimes | CatchRarity | 2 | 15 Gems |
+| daily_place_2 | Place 2 Slimes on Your Plot | PlaceSlime | 2 | 10 Gems + $300 |
+| daily_cash_500 | Earn $500 Cash from Throws | EarnCash | 500 | 10 Gems |
+
+## Robux Store
+
+### Game Passes
+
+| Id | Name | Icon | Robux (R$) | PassId | Effect | Colour |
+| --- | --- | --- | --- | --- | --- | --- |
+| pass_x2_luck | x2 Luck | 🍀 | 149 | 0 | Permanent 2x Luck on every throw! | #55E173 |
+| pass_x2_cash | x2 Cash | 💵 | 149 | 0 | Permanent 2x Cash from slimes & throws! | #37BEFA |
+| pass_vip | VIP | 👑 | 249 | 0 | +10% Cash income and [VIP] chat tag! | #FFC332 |
+
+### Gem Packs (Developer Products)
+
+| Id | Name | Tag | Gems | Robux (R$) | ProductId |
+| --- | --- | --- | --- | --- | --- |
+| pack_100 | 100 Gems | — | +100 | 25 | 0 |
+| pack_550 | 550 Gems | +10% Bonus | +550 | 99 | 0 |
+| pack_1200 | 1,200 Gems | +20% Bonus | +1.2K | 199 | 0 |
+| pack_2600 | 2,600 Gems | Best Value | +2.6K | 399 | 0 |
 
 ## Saving
 

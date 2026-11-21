@@ -46,6 +46,14 @@ return function(t: any)
 		local caught = p.UnplacedSlimes[1]
 		ProgressionLogic.PlaceSlimeAtSlot(p, caught.Uid, 7)
 		ProgressionLogic.EvaluateThrowReward(p, 60, 1, 0, 1.0, 0, true) -- one left in the hotbar
+		p.QuestLineStep = 3
+		p.QuestLineProgress = 6
+		p.DailyQuestDay = 20000
+		p.DailyQuests = {
+			{ Id = "daily_throws_5", Progress = 4, Claimed = false },
+			{ Id = "daily_reps_25", Progress = 25, Claimed = true },
+		}
+		p.ProcessedReceipts = { "rcpt_101", "rcpt_102" }
 		return p
 	end
 
@@ -72,11 +80,22 @@ return function(t: any)
 				"HighestZoneReached",
 				"DailyStreak",
 				"LastDailyClaimDay",
+				"QuestLineStep",
+				"QuestLineProgress",
+				"DailyQuestDay",
 				"NextUid",
 				"EquippedSlimeId",
 			} do
 				expect((loaded :: any)[field]).toBe((p :: any)[field])
 			end
+			expect(#loaded.DailyQuests).toBe(2)
+			expect(loaded.DailyQuests[1].Id).toBe("daily_throws_5")
+			expect(loaded.DailyQuests[1].Progress).toBe(4)
+			expect(loaded.DailyQuests[1].Claimed).toBe(false)
+			expect(loaded.DailyQuests[2].Claimed).toBe(true)
+			expect(#loaded.ProcessedReceipts).toBe(2)
+			expect(loaded.ProcessedReceipts[1]).toBe("rcpt_101")
+			expect(loaded.OwnedPasses.pass_vip == nil).toBe(true) -- passes are checked live from Roblox, not saved
 			expect(loaded.OwnedBoosts.double_cash).toBe(true)
 			expect(loaded.OwnedBoosts.auto_throw).toBe(true)
 			for id in p.DiscoveredSlimes do

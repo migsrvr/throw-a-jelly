@@ -12,6 +12,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared:WaitForChild("GameConfig"))
 local ProgressionLogic = require(Shared:WaitForChild("ProgressionLogic"))
+local QuestLogic = require(Shared:WaitForChild("QuestLogic"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local ThrowPhysics = require(Shared:WaitForChild("ThrowPhysics"))
 
@@ -101,6 +102,10 @@ function ThrowService.Init()
 			nil,
 			true
 		)
+
+		if meterSeg.IsPerfect == true then
+			QuestLogic.RecordEvent(profile, "PerfectThrow", 1)
+		end
 
 		PlayerStateService.Sync(player)
 

@@ -24,6 +24,8 @@ local EVENT_NAMES = {
 	"RequestPlaceOnSlot",
 	"RequestPickupFromSlot",
 	"RequestEquipTrail",
+	"RequestClaimDaily", -- C->S: manual daily reward claim on the 7-day calendar
+	"RequestClaimQuest", -- C->S { Kind = "Line" | "Daily", Index: number? }: claim completed quest
 	"RequestCollect",
 	"RequestTeleport",
 	"ToastNotify",

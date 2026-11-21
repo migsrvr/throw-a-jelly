@@ -89,6 +89,13 @@ Zones are drawn as a tiered "staircase" of terrain in the thumbnail style.
   - **Auto-Throw** always stops the meter in band 5 (+9 power, 1.15x luck), so a hand-timed PERFECT is still better. Throws start after 0.8 s idle at the throw line while the AUTO toggle is on.
   - **Robux gem packs** are not built yet; they need real developer product ids.
 
+- 2026-11-22: Implemented `UI-PLAN.md` (all 3 phases):
+  - **6-button HUD & modular windows (`HudWindows/`)**: Left column = Index, Shop (Cash: Eggs, Throw Power Buy + Buy Max, x2 Cash/Power, Free Gift), Upgrades (`bait_tier`, `slot_expansion`, and the 💎 Gem Shop). Right column = Rewards (with red `"!"` badge), Robux Store (`R$`), and Slimes.
+  - **Step-on Pull-Up Bar**: Walking within 6 studs of your bar's `TrainSpot` auto-starts training; jumping or walking away disarms it until you step out past 9 studs. The bar's E prompt now upgrades the bar tier (`Upgrade Bar`) and is hidden on other players' bars.
+  - **Rewards & Quests (`QuestLogic.luau` + `RewardsWindow.luau`)**: Manual 7-day daily login calendar (`RequestClaimDaily`), a 12-step linear Quest Line, and 3 deterministic Daily Quests per UTC day (`RequestClaimQuest`).
+  - **Robux Store (`MonetizationService.luau` + `RobuxStoreWindow.luau`)**: 3 Game Passes (`x2 Luck`, `x2 Cash`, `VIP`) and 4 Gem Packs (`100 / 550 / 1,200 / 2,600 Gems`) with `ProcessReceipt` deduplication (`ProcessedReceipts`) and immediate save before `PurchaseGranted`. IDs default to `0` (`"Coming soon"` in UI) until pasted into `GameConfig.Robux`.
+  - Fixed all `$$` double-dollar string formatting bugs across the codebase.
+
 ## Update
 
 **2026-11-21: game logic, animations, the power system, saving and Gems are built; the screens are still placeholders.** Everything below is written from the code and the automated tests (69 passing, 0 failing). Nothing here has been confirmed by playing in Studio except where it says so.

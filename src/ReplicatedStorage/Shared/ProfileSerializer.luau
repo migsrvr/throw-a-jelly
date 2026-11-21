@@ -85,6 +85,24 @@ function ProfileSerializer.Serialize(profile: ProgressionLogic.PlayerProfile): {
 		table.insert(unplaced, saveSlime(inst))
 	end
 
+	local dailyQuests: { { Id: string, Progress: number, Claimed: boolean } } = {}
+	for _, slot in (profile.DailyQuests or {}) do
+		if type(slot) == "table" and type(slot.Id) == "string" then
+			table.insert(dailyQuests, {
+				Id = slot.Id,
+				Progress = slot.Progress or 0,
+				Claimed = slot.Claimed == true,
+			})
+		end
+	end
+
+	local receipts: { string } = {}
+	for _, r in (profile.ProcessedReceipts or {}) do
+		if type(r) == "string" and r ~= "" then
+			table.insert(receipts, r)
+		end
+	end
+
 	return {
 		SchemaVersion = GameConfig.Save.SchemaVersion,
 		Cash = profile.Cash,
@@ -112,6 +130,11 @@ function ProfileSerializer.Serialize(profile: ProgressionLogic.PlayerProfile): {
 		HighestZoneReached = profile.HighestZoneReached,
 		DailyStreak = profile.DailyStreak,
 		LastDailyClaimDay = profile.LastDailyClaimDay,
+		QuestLineStep = profile.QuestLineStep,
+		QuestLineProgress = profile.QuestLineProgress,
+		DailyQuestDay = profile.DailyQuestDay,
+		DailyQuests = dailyQuests,
+		ProcessedReceipts = receipts,
 	}
 end
 
@@ -140,6 +163,47 @@ function ProfileSerializer.Deserialize(data: any): ProgressionLogic.PlayerProfil
 	p.DailyStreak = readInt(data.DailyStreak, 0, 0)
 	p.LastDailyClaimDay = readInt(data.LastDailyClaimDay, -1, -1)
 	p.ClaimedFreeGift = data.ClaimedFreeGift == true
+	p.QuestLineStep = readInt(data.QuestLineStep, 1, 1, #GameConfig.Quests.Line + 1)
+	local curLineDef = GameConfig.Quests.Line[p.QuestLineStep]
+	p.QuestLineProgress = readNumber(data.QuestLineProgress, 0, 0, if curLineDef then curLineDef.Target else 0)
+	p.DailyQuestDay = readInt(data.DailyQuestDay, -1, -1)
+
+	if type(data.DailyQuests) == "table" then
+		local dailyById: { [string]: GameConfig.QuestDef } = {}
+		for _, q in GameConfig.Quests.DailyPool do
+			dailyById[q.Id] = q
+		end
+		local loadedDaily = {}
+		for _, raw in data.DailyQuests do
+			if type(raw) == "table" and type(raw.Id) == "string" then
+				local qDef = dailyById[raw.Id]
+				if qDef then
+					table.insert(loadedDaily, {
+						Id = qDef.Id,
+						Progress = readNumber(raw.Progress, 0, 0, qDef.Target),
+						Claimed = raw.Claimed == true,
+					})
+				end
+			end
+			if #loadedDaily >= GameConfig.Quests.DailyCount then
+				break
+			end
+		end
+		p.DailyQuests = loadedDaily
+	end
+
+	if type(data.ProcessedReceipts) == "table" then
+		local loadedReceipts = {}
+		for _, r in data.ProcessedReceipts do
+			if type(r) == "string" and r ~= "" and not table.find(loadedReceipts, r) then
+				table.insert(loadedReceipts, r)
+			end
+		end
+		while #loadedReceipts > GameConfig.Robux.MaxProcessedReceipts do
+			table.remove(loadedReceipts, 1)
+		end
+		p.ProcessedReceipts = loadedReceipts
+	end
 
 	-- Index discoveries (known slimes only; the starter stays discovered)
 	if type(data.DiscoveredSlimes) == "table" then

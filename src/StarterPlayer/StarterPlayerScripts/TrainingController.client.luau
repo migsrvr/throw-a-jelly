@@ -44,6 +44,7 @@ local CAMERA_BLEND_IN = 0.35 -- seconds to swing from the normal camera into the
 
 local isTraining = false
 local stopRequested = false
+local walkStopArmed = false
 local currentInterval = GameConfig.PullUp.BaseRepSeconds
 
 local function getOwnBar(): BasePart?
@@ -65,11 +66,26 @@ local function getOwnBar(): BasePart?
 	return nil
 end
 
-local function setPromptText(active: boolean)
-	local bar = getOwnBar()
-	local prompt = bar and bar:FindFirstChildOfClass("ProximityPrompt")
-	if prompt then
-		prompt.ActionText = if active then "Stop Training" else "Start Training"
+-- Hide the Upgrade Bar prompt on other players' plots locally so only your own bar shows E
+local function refreshBarPromptVisibility()
+	local map = workspace:FindFirstChild("Map")
+	local hub = map and map:FindFirstChild("Hub")
+	local bases = hub and hub:FindFirstChild("PlayerBases")
+	if not bases then
+		return
+	end
+	local plotId = localPlayer:GetAttribute("PlotId")
+	local uidStr = tostring(localPlayer.UserId)
+	for _, plot in bases:GetChildren() do
+		local isOwn = plot:GetAttribute("Owner") == uidStr or (plotId ~= nil and plot:GetAttribute("PlotId") == plotId)
+		if not isOwn then
+			local pullUp = plot:FindFirstChild("PullUpBar")
+			local bar = pullUp and pullUp:FindFirstChild("Bar")
+			local prompt = bar and bar:FindFirstChildOfClass("ProximityPrompt")
+			if prompt then
+				prompt.Enabled = false
+			end
+		end
 	end
 end
 
@@ -542,12 +558,12 @@ end
 local function endTrainingLocal()
 	isTraining = false
 	stopRequested = false
+	walkStopArmed = false
 	CharacterAnimator.StopPullUpLoop()
 	stopCamera()
 	stopFx()
 	clearBonusButton()
 	hudGui.Enabled = false
-	setPromptText(false)
 end
 
 local function requestStop()
@@ -566,6 +582,7 @@ trainingState.OnClientEvent:Connect(function(payload: any)
 	if payload.Active then
 		isTraining = true
 		stopRequested = false
+		walkStopArmed = false
 		if type(payload.Interval) == "number" then
 			currentInterval = payload.Interval
 		end
@@ -576,7 +593,6 @@ trainingState.OnClientEvent:Connect(function(payload: any)
 		startFx()
 		setXpBar(tonumber(payload.StrengthLevel) or 1, tonumber(payload.CurrentXP) or 0, tonumber(payload.RequiredXP) or 10, false)
 		hudGui.Enabled = true
-		setPromptText(true)
 	else
 		endTrainingLocal()
 	end
@@ -622,16 +638,29 @@ trainingBonus.OnClientEvent:Connect(function(payload: any)
 	)
 end)
 
--- Jumping or trying to walk drops you off the bar
+-- Jumping or trying to walk drops you off the bar.
+-- Walking only triggers stop once move input has been released (<= 0.1) at least once after
+-- the session started, so walking onto the pad doesn't immediately stop on the first frame.
 UserInputService.JumpRequest:Connect(requestStop)
-RunService.Heartbeat:Connect(function()
+local promptCheckAccum = 0
+RunService.Heartbeat:Connect(function(dt: number)
+	promptCheckAccum += dt
+	if promptCheckAccum >= 1.0 then
+		promptCheckAccum = 0
+		refreshBarPromptVisibility()
+	end
 	if not isTraining then
 		return
 	end
 	local char = localPlayer.Character
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	if hum and hum.MoveDirection.Magnitude > 0.5 then
-		requestStop()
+	if hum then
+		local mag = hum.MoveDirection.Magnitude
+		if mag <= 0.1 then
+			walkStopArmed = true
+		elseif walkStopArmed and mag > 0.5 then
+			requestStop()
+		end
 	end
 end)
 

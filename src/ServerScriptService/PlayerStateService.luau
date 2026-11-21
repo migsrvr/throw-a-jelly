@@ -12,6 +12,7 @@ local RunService = game:GetService("RunService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared:WaitForChild("GameConfig"))
 local ProgressionLogic = require(Shared:WaitForChild("ProgressionLogic"))
+local QuestLogic = require(Shared:WaitForChild("QuestLogic"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
 
 local DataService = require(script.Parent:WaitForChild("DataService"))
@@ -56,14 +57,30 @@ function PlayerStateService.OnProfileChanged(fn: (Player, ProgressionLogic.Playe
 	table.insert(listeners, fn)
 end
 
+local function refreshDailyAndQuests(player: Player)
+	local profile = profiles[player]
+	if not profile then
+		return
+	end
+	local dayNum = ProgressionLogic.GetDayNumber(os.time())
+	QuestLogic.EnsureDailyQuests(profile, player.UserId, dayNum)
+	QuestLogic.SyncSnapshotProgress(profile)
+end
+
 function PlayerStateService.Sync(player: Player)
 	local profile = profiles[player]
 	if not profile then
 		return
 	end
 
+	refreshDailyAndQuests(player)
+
 	local effPower = ProgressionLogic.GetEffectiveThrowPower(profile)
 	local incomePerSec = ProgressionLogic.GetIncomePerSecond(profile)
+	local now = os.time()
+	local dayNum = ProgressionLogic.GetDayNumber(now)
+	local dailyStatus = ProgressionLogic.GetDailyStatus(profile, dayNum)
+	local secondsUntilNextDay = math.max(0, (dayNum + 1) * GameConfig.Gems.SecondsPerDay - now)
 
 	local ls = player:FindFirstChild("leaderstats")
 	if ls then
@@ -104,6 +121,15 @@ function PlayerStateService.Sync(player: Player)
 		IndexMilestonesClaimed = profile.IndexMilestonesClaimed,
 		HighestZoneReached = profile.HighestZoneReached,
 		DailyStreak = profile.DailyStreak,
+		DailyCanClaim = dailyStatus.CanClaim,
+		DailyNextDay = dailyStatus.NextStreakDay,
+		DailyWillReset = dailyStatus.WillReset,
+		SecondsUntilNextDay = secondsUntilNextDay,
+		QuestLineStep = profile.QuestLineStep,
+		QuestLineProgress = profile.QuestLineProgress,
+		DailyQuestDay = profile.DailyQuestDay,
+		DailyQuests = profile.DailyQuests,
+		OwnedPasses = profile.OwnedPasses,
 		ProgressSaved = DataService.CanSave(player), -- false: this session won't be saved (load failed / Studio)
 		MaxSlimes = profile.MaxSlimes,
 		BestDistance = profile.BestDistance,
@@ -157,20 +183,6 @@ function PlayerStateService.Purchase(player: Player, itemId: string, quantity: P
 	return ok
 end
 
--- Daily login Gems (once per UTC day). Called on join and every minute, so players online across
--- midnight still get the next day's reward.
-local function tryDailyReward(player: Player)
-	local profile = profiles[player]
-	if not profile then
-		return
-	end
-	local claimed, gems, streak = ProgressionLogic.ClaimDailyReward(profile, ProgressionLogic.GetDayNumber(os.time()))
-	if claimed then
-		PlayerStateService.Toast(player, `Daily reward: +{gems} Gems! (Day {streak} streak)`, "gems")
-		PlayerStateService.Sync(player)
-	end
-end
-
 function PlayerStateService.Init()
 	local function onPlayerAdded(player: Player)
 		ensureLeaderstats(player)
@@ -187,7 +199,6 @@ function PlayerStateService.Init()
 				else "Progress can't be saved this session."
 			PlayerStateService.Toast(player, msg, "warn")
 		end
-		tryDailyReward(player)
 	end
 
 	Players.PlayerAdded:Connect(onPlayerAdded)
@@ -204,11 +215,54 @@ function PlayerStateService.Init()
 
 	DataService.Start(PlayerStateService.GetAllProfiles)
 
+	-- Roll daily quests & daily claim availability across UTC midnight while online
 	task.spawn(function()
 		while true do
 			task.wait(60)
 			for player in profiles do
-				tryDailyReward(player)
+				PlayerStateService.Sync(player)
+			end
+		end
+	end)
+
+	Remotes.GetEvent("RequestClaimDaily").OnServerEvent:Connect(function(player: Player)
+		local profile = profiles[player]
+		if not profile then
+			return
+		end
+		local dayNum = ProgressionLogic.GetDayNumber(os.time())
+		local claimed, gems, streak = ProgressionLogic.ClaimDailyReward(profile, dayNum)
+		if claimed then
+			PlayerStateService.Toast(player, `Daily reward: +{gems} Gems! (Day {streak} streak)`, "gems")
+			PlayerStateService.Sync(player)
+		else
+			PlayerStateService.Toast(player, "You already claimed today's reward!", "warn")
+		end
+	end)
+
+	Remotes.GetEvent("RequestClaimQuest").OnServerEvent:Connect(function(player: Player, payload: any)
+		local profile = profiles[player]
+		if not profile or type(payload) ~= "table" then
+			return
+		end
+		refreshDailyAndQuests(player)
+		if payload.Kind == "Line" then
+			local ok, msg, reward = QuestLogic.ClaimLineQuest(profile)
+			local kind = if not ok then "warn" elseif reward and reward.Gems then "gems" else "success"
+			PlayerStateService.Toast(player, msg, kind)
+			if ok then
+				PlayerStateService.Sync(player)
+			end
+		elseif payload.Kind == "Daily" then
+			local idx = tonumber(payload.Index)
+			if not idx then
+				return
+			end
+			local ok, msg, reward = QuestLogic.ClaimDailyQuest(profile, idx)
+			local kind = if not ok then "warn" elseif reward and reward.Gems then "gems" else "success"
+			PlayerStateService.Toast(player, msg, kind)
+			if ok then
+				PlayerStateService.Sync(player)
 			end
 		end
 	end)
