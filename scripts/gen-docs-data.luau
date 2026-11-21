@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Generates docs/DATA-REFERENCE.md from GameConfig.luau so the numbers in the designer docs can never
+	Generates docs/docs/DATA-REFERENCE.md from GameConfig.luau so the numbers in the designer docs can never
 	drift from the code. Re-run after tuning anything in GameConfig:
 
 		lune run scripts/gen-docs-data
@@ -11,7 +11,7 @@ local fs = require("@lune/fs")
 local GameConfig = require("../src/ReplicatedStorage/Shared/GameConfig")
 local ProgressionLogic = require("../src/ReplicatedStorage/Shared/ProgressionLogic")
 
-local OUT_PATH = "docs/DATA-REFERENCE.md"
+local OUT_PATH = "docs/docs/DATA-REFERENCE.md"
 
 -- Copied from SlimeFactory.RARITY_COLORS (that module needs Roblox services, so Lune can't load it).
 -- If you change rarity colours in SlimeFactory.luau, change them here too.
@@ -150,19 +150,69 @@ add()
 add(`## Throw meter segments ({#GameConfig.MeterSegments})`)
 add()
 add("The vertical meter has nine coloured bands. Where the slider stops decides the bonus. Bottom = band 1 (worst).")
+add("Stopping in the top band is a **PERFECT!** throw: a gold \"PERFECT! +20\" callout plus the biggest power bonus.")
 add()
-header({ "Band", "Colour", "Bonus Throw Power", "Luck multiplier" })
+header({ "Band", "Colour", "Bonus Throw Power", "Luck multiplier", "Callout" })
 for _, seg in GameConfig.MeterSegments do
-	row({ tostring(seg.Index), hex(seg.Color), "+" .. tostring(seg.BonusPower), `{string.format("%.2f", seg.LuckMultiplier)}x` })
+	row({
+		tostring(seg.Index),
+		hex(seg.Color),
+		"+" .. tostring(seg.BonusPower),
+		`{string.format("%.2f", seg.LuckMultiplier)}x`,
+		if seg.IsPerfect then "PERFECT!" else "",
+	})
+end
+add()
+
+-- Flight luck -----------------------------------------------------------------
+add("## Flight luck")
+add()
+add("Luck decides how likely rarer slimes and mutations are. It is shown live as \"1.XXx LUCK\" while the bait flies,")
+add(`and climbs the further the bait goes: +1.00x for every {GameConfig.FlightLuck.StudsPerExtraLuck} studs, multiplied by the meter band luck and the Jelly Bait luck.`)
+add()
+local zoneEnds = {}
+for _, z in GameConfig.Zones do
+	table.insert(zoneEnds, z.EndZ)
+end
+local luckHead = { "Bait \\ distance" }
+for _, d in zoneEnds do
+	table.insert(luckHead, `{d} studs`)
+end
+header(luckHead)
+for _, bait in GameConfig.BaitTiers do
+	local cells = { bait.Name }
+	for _, d in zoneEnds do
+		table.insert(cells, string.format("%.2fx", GameConfig.ComputeFlightLuck(d, 1.0, bait.LuckMultiplier)))
+	end
+	row(cells)
+end
+add()
+add("(Table uses meter band 1. A PERFECT throw multiplies every value by the top band's luck.)")
+add()
+
+-- Jelly bait ------------------------------------------------------------------
+add(`## Jelly Bait tiers ({#GameConfig.BaitTiers})`)
+add()
+add("Bought in the Shop. Better bait does not throw further; it multiplies the luck of every throw.")
+add()
+header({ "Tier", "Name", "Cost", "Luck multiplier", "Colour" })
+for _, b in GameConfig.BaitTiers do
+	row({
+		tostring(b.Tier),
+		b.Name,
+		if b.Cost <= 0 then "(starting bait)" else "$" .. num(b.Cost),
+		`{string.format("%.2f", b.LuckMultiplier)}x`,
+		hex(b.Color),
+	})
 end
 add()
 
 -- Pull-up bar -----------------------------------------------------------------
 add(`## Pull-up bar tiers ({#GameConfig.PullUpTiers})`)
 add()
-add("Training on the bar adds Throw Power. A better bar gives more power per rep and also does reps faster.")
+add("Training on the bar gives Training XP. A better bar gives more XP per rep and also does reps faster.")
 add()
-header({ "Tier", "Name", "Upgrade cost", "Power per rep", "Rep speed multiplier" })
+header({ "Tier", "Name", "Upgrade cost", "XP per rep", "Rep speed multiplier" })
 for _, t in GameConfig.PullUpTiers do
 	row({
 		tostring(t.Tier),
@@ -171,6 +221,22 @@ for _, t in GameConfig.PullUpTiers do
 		"+" .. num(t.XPPerRep),
 		`x{t.SpeedMult}`,
 	})
+end
+add()
+add("### Strength levels")
+add()
+local tcfg = GameConfig.Training
+add(`Training XP fills a level bar. Every level up gives **+{tcfg.PowerPerLevel} Throw Power** and a \"LEVEL UP!\" popup.`)
+add(`While training, a **BONUS REP!** button pops up every {tcfg.BonusRepIntervalMin}-{tcfg.BonusRepIntervalMax} seconds; clicking it within {tcfg.BonusRepWindow}s gives {tcfg.BonusRepMultiplier}x the XP of one rep.`)
+add()
+header({ "Level", "XP to next level", "Total XP from level 1", "Throw Power from levels" })
+local totalXp = 0
+for lvl = 1, 50 do
+	local req = GameConfig.GetXPRequiredForLevel(lvl)
+	if lvl <= 10 or lvl % 10 == 0 then
+		row({ tostring(lvl), num(req), num(totalXp), "+" .. num((lvl - 1) * tcfg.PowerPerLevel) })
+	end
+	totalXp += req
 end
 add()
 add("### How long one pull-up takes")
@@ -201,26 +267,38 @@ add("### Shop items in display order")
 add()
 add("These are the shop's building blocks. A button or card in the shop = one row here.")
 add()
-header({ "Item id", "Group", "Icon", "What it does", "Colour" })
+header({ "Item id", "Group", "Icon", "Paid with", "What it does", "Colour" })
 local ACTION_TEXT: { [string]: string } = {
 	PowerUpgrade = "Raises Throw Power by one upgrade level (price grows each level)",
 	PullUpTier = "Upgrades the pull-up bar to the next tier",
-	SlotExpansion = "Adds 4 more slime slots to the plot (8 to 12)",
+	BaitTier = "Upgrades the Jelly Bait to the next quality tier (more luck)",
+	SlotExpansion = "Adds 4 more slime slots to the plot (8 to 12); the Cash and Gem versions unlock the same slots",
 	Boost = "Permanent boost (see boosts below)",
 	Egg = "Hatches 1 or 3 slimes with the odds listed below",
 	FreeGift = "One-time free slime",
 }
 for _, item in GameConfig.ShopCatalog do
-	row({ item.Id, item.Category, item.Icon, ACTION_TEXT[item.Action] or item.Action, hex(item.Color) })
+	local paidWith: string = item.PriceKind
+	if item.Action == "Boost" then
+		local boost = GameConfig.ShopBoosts[item.Args.BoostId or ""]
+		paidWith = if boost then boost.PriceKind else paidWith
+	end
+	row({ item.Id, item.Category, item.Icon, paidWith, ACTION_TEXT[item.Action] or item.Action, hex(item.Color) })
 end
 add()
 
+local function price(amount: number, kind: string): string
+	return if kind == "Gems" then `{num(amount)} Gems` else "$" .. num(amount)
+end
+
 add("### Boosts")
 add()
+add("All boosts are permanent once bought.")
+add()
 header({ "Name", "Description", "Price", "Colour" })
-for _, id in { "double_cash", "double_power" } do
-	local b = (GameConfig.ShopBoosts :: any)[id]
-	row({ b.Name, b.Description, "$" .. num(b.Cost), hex(b.Color) })
+for _, id in GameConfig.ShopBoostOrder do
+	local b = GameConfig.ShopBoosts[id]
+	row({ b.Name, b.Description, price(b.Cost, b.PriceKind), hex(b.Color) })
 end
 add()
 
@@ -247,7 +325,71 @@ add()
 -- Plot ------------------------------------------------------------------------
 add("## Plot slots")
 add()
-add(`Every plot starts with {GameConfig.Slots.InitialMaxSlimes} slime slots; a one-time purchase of ${num(GameConfig.Slots.ExpansionCost)} unlocks all {GameConfig.Slots.ExpandedMaxSlimes}.`)
+add(`Every plot starts with {GameConfig.Slots.InitialMaxSlimes} slime slots; a one-time purchase of ${num(GameConfig.Slots.ExpansionCost)} (or {num(GameConfig.Slots.ExpansionGemCost)} Gems) unlocks all {GameConfig.Slots.ExpandedMaxSlimes}.`)
+add()
+
+-- Gems ------------------------------------------------------------------------
+local g = GameConfig.Gems
+add("## Gems (premium currency)")
+add()
+add("Shown as 💎 in the HUD and the shop. Earned slowly by playing; spent in the Gem Shop (see the Gem rows in the shop table).")
+add("Buying Gems with Robux is planned but not built yet.")
+add()
+add("### Index milestones (paid once each)")
+add()
+header({ "Slimes discovered", "Gems" })
+for _, m in g.IndexMilestones do
+	row({ tostring(m.Discovered), "+" .. num(m.Gems) })
+end
+add()
+add("### First time reaching a zone (paid once per zone)")
+add()
+add("A throw that lands in a zone for the first time pays that zone and every zone before it that wasn't paid yet.")
+add()
+header({ "Zone", "Gems" })
+for i, gems in g.FirstZoneReach do
+	local z = GameConfig.Zones[i]
+	row({ if z then `{z.Emoji} {z.Name}` else tostring(i), "+" .. num(gems) })
+end
+add()
+add("### Daily login streak")
+add()
+add("Claimed automatically once per day (UTC) when the player joins or is online at midnight. Missing a day restarts at day 1.")
+add(`After day {#g.DailyRewards} the streak keeps paying the day-{#g.DailyRewards} amount.`)
+add()
+header({ "Streak day", "Gems" })
+for day, gems in g.DailyRewards do
+	row({ tostring(day), "+" .. num(gems) })
+end
+add()
+add("### Rare catches (throws only, not eggs)")
+add()
+add("A caught slime pays its rarity amount plus its mutation amount. Anything not listed pays 0.")
+add()
+header({ "Rarity or mutation", "Gems" })
+for _, r in RARITY_ORDER do
+	if g.RarityDrops[r] then
+		row({ r, "+" .. num(g.RarityDrops[r]) })
+	end
+end
+for _, m in GameConfig.Mutations do
+	if g.MutationDrops[m.Id] then
+		row({ m.Id, "+" .. num(g.MutationDrops[m.Id]) })
+	end
+end
+add()
+add("### Auto-Throw")
+add()
+add(`Once bought, an AUTO toggle appears under the throw meter. While it's on, the player throws by itself after {GameConfig.AutoThrow.IdleDelaySeconds}s at the throw line,`)
+local autoSeg = GameConfig.EvaluateMeterRatio(GameConfig.AutoThrow.MeterRatio)
+add(`always stopping the meter in band {autoSeg.Index} (+{autoSeg.BonusPower} power, {string.format("%.2f", autoSeg.LuckMultiplier)}x luck), so a PERFECT by hand is still better.`)
+add()
+
+-- Saving ----------------------------------------------------------------------
+add("## Saving")
+add()
+add(`Progress autosaves every {GameConfig.Save.AutosaveSeconds} seconds, when the player leaves, and when the server shuts down.`)
+add("If a save can't be loaded, the player can still play but gets a \"Progress can't be saved this session.\" message.")
 add()
 
 fs.writeFile(OUT_PATH, table.concat(lines, "\n") .. "\n")

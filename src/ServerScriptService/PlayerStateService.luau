@@ -7,11 +7,14 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared:WaitForChild("GameConfig"))
 local ProgressionLogic = require(Shared:WaitForChild("ProgressionLogic"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
+
+local DataService = require(script.Parent:WaitForChild("DataService"))
 
 local PlayerStateService = {}
 
@@ -97,6 +100,11 @@ function PlayerStateService.Sync(player: Player)
 		TrainingXP = profile.TrainingXP,
 		TrainingXPRequired = GameConfig.GetXPRequiredForLevel(profile.StrengthLevel),
 		BaitTier = profile.BaitTier,
+		Gems = profile.Gems,
+		IndexMilestonesClaimed = profile.IndexMilestonesClaimed,
+		HighestZoneReached = profile.HighestZoneReached,
+		DailyStreak = profile.DailyStreak,
+		ProgressSaved = DataService.CanSave(player), -- false: this session won't be saved (load failed / Studio)
 		MaxSlimes = profile.MaxSlimes,
 		BestDistance = profile.BestDistance,
 		EquippedSlimeId = profile.EquippedSlimeId,
@@ -149,26 +157,61 @@ function PlayerStateService.Purchase(player: Player, itemId: string, quantity: P
 	return ok
 end
 
+-- Daily login Gems (once per UTC day). Called on join and every minute, so players online across
+-- midnight still get the next day's reward.
+local function tryDailyReward(player: Player)
+	local profile = profiles[player]
+	if not profile then
+		return
+	end
+	local claimed, gems, streak = ProgressionLogic.ClaimDailyReward(profile, ProgressionLogic.GetDayNumber(os.time()))
+	if claimed then
+		PlayerStateService.Toast(player, `Daily reward: +{gems} Gems! (Day {streak} streak)`, "gems")
+		PlayerStateService.Sync(player)
+	end
+end
+
 function PlayerStateService.Init()
 	local function onPlayerAdded(player: Player)
-		profiles[player] = ProgressionLogic.CreateInitialProfile()
 		ensureLeaderstats(player)
-		task.defer(function()
-			if player.Parent then
-				PlayerStateService.Sync(player)
-			end
-		end)
+		local profile, loaded = DataService.Load(player) -- yields (DataStore); other services wait for GetProfile
+		if not player.Parent then
+			DataService.SaveAndRelease(player, nil) -- left while loading: nothing new to save
+			return
+		end
+		profiles[player] = profile
+		PlayerStateService.Sync(player)
+		if not loaded then
+			local msg = if RunService:IsStudio()
+				then "Saving is off: File > Experience Settings > Security > enable Studio API access."
+				else "Progress can't be saved this session."
+			PlayerStateService.Toast(player, msg, "warn")
+		end
+		tryDailyReward(player)
 	end
 
 	Players.PlayerAdded:Connect(onPlayerAdded)
 	Players.PlayerRemoving:Connect(function(player: Player)
+		local profile = profiles[player]
 		profiles[player] = nil
 		lastPurchaseAt[player] = nil
+		DataService.SaveAndRelease(player, profile)
 	end)
 
 	for _, player in Players:GetPlayers() do
-		onPlayerAdded(player)
+		task.spawn(onPlayerAdded, player)
 	end
+
+	DataService.Start(PlayerStateService.GetAllProfiles)
+
+	task.spawn(function()
+		while true do
+			task.wait(60)
+			for player in profiles do
+				tryDailyReward(player)
+			end
+		end
+	end)
 
 	-- Single entry point for every shop purchase (UI buttons, JellyShop prompt, UpgradeStand prompt)
 	Remotes.GetEvent("RequestPurchase").OnServerEvent:Connect(function(player: Player, payload: any)

@@ -29,11 +29,13 @@ return function(t: any)
 	end)
 
 	describe("ProgressionLogic - Pull-Up Bar Training & Gym Tiers", function()
-		it("adds XPPerRep on each pull-up rep according to current PullUpTier", function()
+		it("adds Training XP (not raw power) per rep according to current PullUpTier", function()
 			local p = ProgressionLogic.CreateInitialProfile()
-			local gain1 = ProgressionLogic.ApplyPullUpRep(p)
-			expect(gain1).toBe(GameConfig.PullUpTiers[1].XPPerRep)
-			expect(p.BaseThrowPower).toBe(5 + gain1)
+			local r1 = ProgressionLogic.ApplyPullUpRep(p)
+			expect(r1.XPGained).toBe(GameConfig.PullUpTiers[1].XPPerRep)
+			expect(p.TrainingXP).toBe(r1.XPGained)
+			expect(r1.LevelsGained).toBe(0)
+			expect(p.BaseThrowPower).toBe(5) -- power only comes from level ups now
 
 			p.Cash = GameConfig.PullUpTiers[2].Cost
 			local ok = ProgressionLogic.PurchasePullUpTier(p)
@@ -41,9 +43,53 @@ return function(t: any)
 			expect(p.PullUpTier).toBe(2)
 			expect(p.Cash).toBe(0)
 
-			local gain2 = ProgressionLogic.ApplyPullUpRep(p)
-			expect(gain2).toBe(GameConfig.PullUpTiers[2].XPPerRep)
-			expect(gain2).toBeGreaterThan(gain1)
+			local r2 = ProgressionLogic.ApplyPullUpRep(p)
+			expect(r2.XPGained).toBe(GameConfig.PullUpTiers[2].XPPerRep)
+			expect(r2.XPGained).toBeGreaterThan(r1.XPGained)
+		end)
+
+		it("levels up exactly at the XP threshold and gives +PowerPerLevel Throw Power", function()
+			local p = ProgressionLogic.CreateInitialProfile()
+			local required = GameConfig.GetXPRequiredForLevel(1)
+			local xpPerRep = GameConfig.PullUpTiers[1].XPPerRep
+			local repsNeeded = math.ceil(required / xpPerRep)
+			for _ = 1, repsNeeded - 1 do
+				expect(ProgressionLogic.ApplyPullUpRep(p).LevelsGained).toBe(0)
+			end
+			expect(p.StrengthLevel).toBe(1)
+			local r = ProgressionLogic.ApplyPullUpRep(p)
+			expect(r.LevelsGained).toBe(1)
+			expect(r.PowerGained).toBe(GameConfig.Training.PowerPerLevel)
+			expect(p.StrengthLevel).toBe(2)
+			expect(p.BaseThrowPower).toBe(5 + GameConfig.Training.PowerPerLevel)
+			expect(p.TrainingXP).toBe(repsNeeded * xpPerRep - required) -- leftover XP carries over
+			expect(r.RequiredXP).toBe(GameConfig.GetXPRequiredForLevel(2))
+		end)
+
+		it("rolls over multiple levels from one big rep", function()
+			local p = ProgressionLogic.CreateInitialProfile()
+			p.PullUpTier = #GameConfig.PullUpTiers -- 600 XP / rep
+			local r = ProgressionLogic.ApplyPullUpRep(p)
+			expect(r.LevelsGained).toBeGreaterThan(1)
+			expect(p.StrengthLevel).toBe(1 + r.LevelsGained)
+			expect(p.BaseThrowPower).toBe(5 + r.LevelsGained * GameConfig.Training.PowerPerLevel)
+			expect(p.TrainingXP < GameConfig.GetXPRequiredForLevel(p.StrengthLevel)).toBe(true)
+		end)
+
+		it("multiplies XP by the Bonus Rep multiplier", function()
+			local a = ProgressionLogic.CreateInitialProfile()
+			local b = ProgressionLogic.CreateInitialProfile()
+			a.PullUpTier, b.PullUpTier = 3, 3
+			local normal = ProgressionLogic.ApplyPullUpRep(a).XPGained
+			local bonus = ProgressionLogic.ApplyPullUpRep(b, GameConfig.Training.BonusRepMultiplier).XPGained
+			expect(bonus).toBe(normal * GameConfig.Training.BonusRepMultiplier)
+		end)
+
+		it("follows the documented XP curve", function()
+			expect(GameConfig.GetXPRequiredForLevel(1)).toBe(10)
+			expect(GameConfig.GetXPRequiredForLevel(5)).toBe(87)
+			expect(GameConfig.GetXPRequiredForLevel(10)).toBe(223)
+			expect(GameConfig.GetXPRequiredForLevel(20)).toBe(570)
 		end)
 
 		it("rejects Pull-Up Tier upgrade when cash is insufficient or at max tier", function()
@@ -202,6 +248,58 @@ return function(t: any)
 		end)
 	end)
 
+	describe("ProgressionLogic - Jelly Bait Quality & Flight Luck", function()
+		it("buys bait tiers in order, charges the cost, and stops at max tier", function()
+			local p = ProgressionLogic.CreateInitialProfile()
+			expect(p.BaitTier).toBe(1)
+			expect((ProgressionLogic.PurchaseBaitTier(p))).toBe(false) -- $0 cash
+			expect(p.BaitTier).toBe(1)
+
+			p.Cash = 1e7
+			for tier = 2, #GameConfig.BaitTiers do
+				local before = p.Cash
+				expect((ProgressionLogic.PurchaseBaitTier(p))).toBe(true)
+				expect(p.BaitTier).toBe(tier)
+				expect(p.Cash).toBe(before - GameConfig.BaitTiers[tier].Cost)
+			end
+			local cashAtMax = p.Cash
+			expect((ProgressionLogic.PurchaseBaitTier(p))).toBe(false)
+			expect(p.Cash).toBe(cashAtMax)
+		end)
+
+		it("sells bait through the shop catalog with Maxed state at the top tier", function()
+			local p = ProgressionLogic.CreateInitialProfile()
+			p.Cash = GameConfig.BaitTiers[2].Cost
+			expect(ProgressionLogic.GetShopListingEntry(p, "bait_tier").Title).toBe(GameConfig.BaitTiers[2].Name)
+			expect((ProgressionLogic.Purchase(p, "bait_tier", 1))).toBe(true)
+			expect(p.BaitTier).toBe(2)
+			p.BaitTier = #GameConfig.BaitTiers
+			expect(ProgressionLogic.GetShopListingEntry(p, "bait_tier").State).toBe("Maxed")
+		end)
+
+		it("ComputeFlightLuck grows with distance, meter luck and bait luck", function()
+			expect(GameConfig.ComputeFlightLuck(0, 1, 1)).toBeNear(1)
+			local prev = 0
+			for _, d in { 0, 100, 350, 700, 1200 } do
+				local v = GameConfig.ComputeFlightLuck(d, 1, 1)
+				expect(v > prev).toBe(true)
+				prev = v
+			end
+			expect(GameConfig.ComputeFlightLuck(350, 1, 1)).toBeNear(2)
+			expect(GameConfig.ComputeFlightLuck(350, 1.5, 1) > GameConfig.ComputeFlightLuck(350, 1, 1)).toBe(true)
+			expect(GameConfig.ComputeFlightLuck(350, 1, 2) > GameConfig.ComputeFlightLuck(350, 1, 1)).toBe(true)
+			-- never below 1x even with bad inputs
+			expect(GameConfig.ComputeFlightLuck(-50, 0.5, 0.2)).toBeNear(1)
+		end)
+
+		it("top meter band is a PERFECT +20", function()
+			local top = GameConfig.EvaluateMeterRatio(1.0)
+			expect(top.IsPerfect).toBe(true)
+			expect(top.BonusPower).toBe(20)
+			expect(GameConfig.EvaluateMeterRatio(0.5).IsPerfect == true).toBe(false)
+		end)
+	end)
+
 	describe("ProgressionLogic - Pull-Up Loop Speed (strength + bar tier)", function()
 		local cfg = GameConfig.PullUp
 
@@ -274,7 +372,7 @@ return function(t: any)
 		end)
 
 		it("buys each upgrade/boost through Purchase and charges the listed price", function()
-			for _, id in { "power_upgrade", "pullup_tier", "slot_expansion", "boost_double_cash", "boost_double_power" } do
+			for _, id in { "power_upgrade", "pullup_tier", "bait_tier", "slot_expansion", "boost_double_cash", "boost_double_power" } do
 				local p = ProgressionLogic.CreateInitialProfile()
 				p.Cash = 1e6
 				local price = ProgressionLogic.GetShopListingEntry(p, id).Price

@@ -599,4 +599,50 @@ trainingRep.OnClientEvent:Connect(function(payload: any)
 			popCenterText(`+{GameConfig.FormatNumber(xp)} XP ({GameConfig.Training.BonusRepMultiplier}x)!`, Color3.fromRGB(255, 200, 60), 44, 0.42)
 		end
 	else
-		o
+		onRepPeak(xp)
+	end
+
+	if type(payload.StrengthLevel) == "number" then
+		setXpBar(payload.StrengthLevel, tonumber(payload.CurrentXP) or 0, tonumber(payload.RequiredXP) or 1, true)
+	end
+	local levels = tonumber(payload.LevelsGained) or 0
+	if levels > 0 then
+		celebrateLevelUp(levels, tonumber(payload.PowerGained) or levels * GameConfig.Training.PowerPerLevel)
+	end
+end)
+
+trainingBonus.OnClientEvent:Connect(function(payload: any)
+	if type(payload) ~= "table" or not isTraining or type(payload.Id) ~= "number" then
+		return
+	end
+	showBonusButton(
+		payload.Id,
+		tonumber(payload.Window) or GameConfig.Training.BonusRepWindow,
+		tonumber(payload.Multiplier) or GameConfig.Training.BonusRepMultiplier
+	)
+end)
+
+-- Jumping or trying to walk drops you off the bar
+UserInputService.JumpRequest:Connect(requestStop)
+RunService.Heartbeat:Connect(function()
+	if not isTraining then
+		return
+	end
+	local char = localPlayer.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if hum and hum.MoveDirection.Magnitude > 0.5 then
+		requestStop()
+	end
+end)
+
+-- Death / respawn mid-training must never leave the camera or effects stuck
+localPlayer.CharacterAdded:Connect(function()
+	if isTraining or camActive then
+		endTrainingLocal()
+	end
+end)
+localPlayer.CharacterRemoving:Connect(function()
+	if isTraining or camActive then
+		endTrainingLocal()
+	end
+end)

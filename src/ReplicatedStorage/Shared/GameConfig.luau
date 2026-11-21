@@ -80,14 +80,27 @@ export type PullUpTierDef = {
 
 export type ShopAction = "PowerUpgrade" | "PullUpTier" | "BaitTier" | "SlotExpansion" | "Boost" | "Egg" | "FreeGift"
 
+-- Which wallet a shop item is paid from. "Robux" is reserved for future developer products.
+export type PriceKind = "Cash" | "Gems"
+
 export type ShopCatalogItem = {
 	Id: string,
-	Category: "Upgrade" | "Boost" | "Egg" | "Gift",
+	Category: "Upgrade" | "Boost" | "Egg" | "Gift" | "Gem",
 	Action: ShopAction,
 	Args: { BoostId: string?, EggId: string? },
 	Icon: string,
 	Color: RGB,
-	PriceKind: "Cash", -- reserved for future "Robux" items
+	PriceKind: PriceKind,
+}
+
+export type ShopBoostDef = {
+	Id: string,
+	Name: string,
+	Description: string,
+	Cost: number, -- in the boost's PriceKind currency
+	PriceKind: PriceKind,
+	Color: RGB,
+	LuckMultiplier: number?, -- luck boosts: multiplies every throw's luck
 }
 
 export type ShopEggItem = {
@@ -143,6 +156,47 @@ GameConfig.Slots = {
 	ExpandedMaxSlimes = 12,
 	TotalSlotParts = 12,
 	ExpansionCost = 5000,
+	ExpansionGemCost = 60, -- the same +4 slots, bought with Gems instead of Cash
+}
+
+-- Gems: the premium currency. Earned slowly in-game (Index milestones, first time reaching each zone,
+-- daily login streak, rare slime catches) and spent on convenience upgrades (Auto-Throw, Lucky Charm,
+-- extra slots). Robux gem packs are planned but not built (they need real developer product ids).
+GameConfig.Gems = {
+	-- Paid once each, the first time the Slime Index reaches this many discovered slimes
+	IndexMilestones = {
+		{ Discovered = 3, Gems = 10 },
+		{ Discovered = 6, Gems = 15 },
+		{ Discovered = 9, Gems = 25 },
+		{ Discovered = 12, Gems = 40 },
+		{ Discovered = 15, Gems = 75 },
+	},
+	-- Zone index -> Gems paid the first time a throw lands in that zone (reaching zone N pays every zone up to N)
+	FirstZoneReach = { 5, 15, 30, 50, 80 },
+	-- Daily login streak: day 1..7 reward; day 8+ keeps paying the last value. Missing a day resets to day 1.
+	DailyRewards = { 5, 8, 10, 12, 15, 20, 35 },
+	SecondsPerDay = 86400, -- days are counted in UTC from os.time()
+	-- Rare catches from throws (eggs don't pay, so Cash can't be turned straight into Gems)
+	RarityDrops = { Legendary = 3, Mythic = 8 } :: { [string]: number },
+	MutationDrops = { CRYSTAL = 3, RAINBOW = 6 } :: { [string]: number },
+}
+
+-- Auto-Throw (bought with Gems): throws by itself whenever you stand idle at the throw line.
+-- It always stops the meter at MeterRatio, so a timed PERFECT by hand stays better.
+GameConfig.AutoThrow = {
+	MeterRatio = 0.5, -- band 5 (+9 power, 1.15x luck)
+	IdleDelaySeconds = 0.8, -- wait this long at the throw line before each auto throw
+}
+
+-- Saving (DataStoreService). Bump SchemaVersion when the saved shape changes and teach
+-- ProfileSerializer.Deserialize to read the older version.
+GameConfig.Save = {
+	DataStoreName = "PlayerProfile_v1",
+	KeyPrefix = "Player_",
+	SchemaVersion = 1,
+	AutosaveSeconds = 60,
+	LoadRetries = 3,
+	RetryDelaySeconds = 1.5,
 }
 
 -- 9-Segment Vertical Throw Meter (bottom segment 1 = Red -> top segment 9 = Bright Green).
@@ -189,7 +243,7 @@ GameConfig.Training = {
 	BonusRepServerCooldown = 3.5, -- minimum seconds between two accepted Bonus Reps
 }
 
--- XP needed to go from `level` to `level + 1` (Lv1->2 = 10, Lv5->6 = 88, Lv10->11 = 223, Lv20->21 = 570).
+-- XP needed to go from `level` to `level + 1` (Lv1->2 = 10, Lv5->6 = 87, Lv10->11 = 223, Lv20->21 = 570).
 function GameConfig.GetXPRequiredForLevel(level: number): number
 	local lvl = math.max(1, math.floor(level))
 	return math.floor(10 * (lvl ^ 1.35))
@@ -701,6 +755,7 @@ GameConfig.ShopBoosts = {
 		Name = "x2 Cash",
 		Description = "Double cash from every slime!",
 		Cost = 500,
+		PriceKind = "Cash",
 		Color = { 65, 190, 255 },
 	},
 	double_power = {
@@ -708,9 +763,30 @@ GameConfig.ShopBoosts = {
 		Name = "x2 Training Power",
 		Description = "Double XP on every pull-up!",
 		Cost = 750,
+		PriceKind = "Cash",
 		Color = { 165, 110, 255 },
 	},
-}
+	auto_throw = {
+		Id = "auto_throw",
+		Name = "Auto-Throw",
+		Description = "Throws for you while you stand at the throw line!",
+		Cost = 150,
+		PriceKind = "Gems",
+		Color = { 80, 210, 230 },
+	},
+	lucky_charm = {
+		Id = "lucky_charm",
+		Name = "Lucky Charm",
+		Description = "x1.5 Luck on every throw!",
+		Cost = 120,
+		PriceKind = "Gems",
+		Color = { 90, 225, 120 },
+		LuckMultiplier = 1.5,
+	},
+} :: { [string]: ShopBoostDef }
+
+-- Display order for boost tables (ShopBoosts is keyed by id, so it has no order of its own)
+GameConfig.ShopBoostOrder = { "double_cash", "double_power", "auto_throw", "lucky_charm" }
 
 GameConfig.FreeGift = {
 	SlimeId = "meadow_bloom",
@@ -735,6 +811,10 @@ GameConfig.ShopCatalog = {
 	{ Id = "egg_enchanted", Category = "Egg", Action = "Egg", Args = { EggId = "enchanted_egg" }, Icon = "🥚", Color = { 175, 110, 255 }, PriceKind = "Cash" },
 	{ Id = "egg_rainbow", Category = "Egg", Action = "Egg", Args = { EggId = "rainbow_egg" }, Icon = "🌈", Color = { 255, 120, 200 }, PriceKind = "Cash" },
 	{ Id = "free_gift", Category = "Gift", Action = "FreeGift", Args = {}, Icon = "🎁", Color = { 255, 205, 55 }, PriceKind = "Cash" },
+	-- Gem items (PriceKind = "Gems": paid from the Gems wallet)
+	{ Id = "gem_auto_throw", Category = "Gem", Action = "Boost", Args = { BoostId = "auto_throw" }, Icon = "🤖", Color = { 80, 210, 230 }, PriceKind = "Gems" },
+	{ Id = "gem_lucky_charm", Category = "Gem", Action = "Boost", Args = { BoostId = "lucky_charm" }, Icon = "🍀", Color = { 90, 225, 120 }, PriceKind = "Gems" },
+	{ Id = "gem_slot_expansion", Category = "Gem", Action = "SlotExpansion", Args = {}, Icon = "🧺", Color = { 95, 200, 120 }, PriceKind = "Gems" },
 } :: { ShopCatalogItem }
 
 GameConfig.ShopCatalogById = {} :: { [string]: ShopCatalogItem }

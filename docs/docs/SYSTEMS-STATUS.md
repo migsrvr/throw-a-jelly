@@ -10,8 +10,12 @@ Legend: ✅ built and covered by automated tests · 🟡 built, **not yet confir
 
 | System | Status | Notes |
 | --- | --- | --- |
-| Player profile (cash, power, slimes, boosts, discoveries) | ✅ | `ProgressionLogic.luau`; created fresh on join |
-| **Saving progress** | ⬜ | **Nothing is saved.** No DataStore anywhere; progress resets every session. Biggest gap before any real playtest |
+| Player profile (cash, gems, power, slimes, boosts, discoveries) | ✅ | `ProgressionLogic.luau`; loaded from the save on join |
+| Save format (profile <-> DataStore table) | ✅ | `ProfileSerializer.luau`; JSON round trip, old-save defaults and bad-data clean-up tested |
+| **Saving progress** (DataStore) | 🟡 | `DataService.luau`: load with retries, autosave every 60 s, save on leave and on shutdown. Needs a published place + "Enable Studio Access to API Services" to test in Studio. No session locking yet |
+| Gems: earning (Index milestones, first zone reach, daily streak, rare catches) | ✅ | reducers in `ProgressionLogic.luau`, `tests/Gems.spec.luau`; daily claim runs in `PlayerStateService` |
+| Gems: spending (Auto-Throw, Lucky Charm, +4 slots) | ✅ | same shop purchase path, `PriceKind = "Gems"` |
+| Auto-Throw | 🟡 | toggle + loop in `ThrowController.client.luau`, ownership checked in `ThrowService.luau`; untested in Studio |
 | Throw validation and landing/reward | ✅ | `ThrowService.luau` + `ThrowPhysics.luau`; server re-simulates the throw |
 | Zone gating by Throw Power | ✅ | tested in `ThrowPhysics.spec` |
 | Slime roll, mutation roll, "1 in X", super lucky | ✅ | `EvaluateThrowReward` |
@@ -23,7 +27,7 @@ Legend: ✅ built and covered by automated tests · 🟡 built, **not yet confir
 | Shop catalog + single purchase path | ✅ | `RequestPurchase`; 7 purchase tests; see [shop-catalog.md](shop-catalog.md) |
 | Leaderboards in the hub | 🟡 | refreshed from `PlotService.luau`; untested |
 | Map clean-up (flicker/shadow fixes) | 🟡 | `MapOptimizer.luau`, runs once on start; edits ~13,000 map parts |
-| Robux purchases (passes, products) | ⬜ | catalog has a reserved `PriceKind`, no code |
+| Robux purchases (passes, products, gem packs) | ⬜ | `PriceKind` supports Cash and Gems; Robux needs real product ids and a `ProcessReceipt` handler |
 
 ## Client systems
 
@@ -52,8 +56,10 @@ because anchoring made the server own the body and froze the client animation).
 
 ## Tests
 
-`lune run tests/run-tests` -> **31 tests, all passing** at the time of writing.
+`lune run tests/run-tests` -> **69 tests, all passing** at the time of writing (2026-11-21).
 - Throw physics (trajectory, bounces, zone gating)
+- Gems: milestones, zone reach, daily streak, rare catches, gem purchases, listing wallet (`Gems.spec`)
+- Saving: JSON round trip, sparse slots, old-save defaults, clamping, unknown ids (`ProfileSerializer.spec`)
 - Profile logic: rewards, mutation and odds, hotbar and slots, index and trails, power and bar upgrades
 - Pull-up rep speed (monotonic in strength and tier, floors at the minimum)
 - Shop: list states, every purchase path, bad ids and quantities rejected without charging
@@ -67,7 +73,8 @@ The generated data tables in [DATA-REFERENCE.md](DATA-REFERENCE.md) come from `l
    dollar signs. About 22 places across `ProgressionLogic.luau`, `PlotService.luau`, `HudController.client.luau`,
    `ThrowController.client.luau`, `SlimeFactory.luau`. Shop prices from the new shop list are correct; error
    messages like "Need $$25 Cash" and the bar billboard "Upgrade: $$75" are not. Fix: replace `$${` with `${`.
-2. 🔴 **No saving** (above).
+2. 🟡 **Saving is built but unconfirmed in Studio** (above). Without API access it turns itself off with one
+   warning and the player sees "Progress can't be saved this session."
 3. 🟡 **Debug output still on:** `DEBUG = true` in `CharacterAnimator.luau`, the `[ThrowController] loaded` print in
    `ThrowController.client.luau`, and the `[TrainingController] TrainingState` print in `TrainingController.client.luau`.
 4. 🟡 **Old scripts inside the place file.** `docs/place-hierarchy.txt` lists a `Server` script and a `Client` local
@@ -85,10 +92,11 @@ The generated data tables in [DATA-REFERENCE.md](DATA-REFERENCE.md) come from `l
 
 ## Not built (decisions for you)
 
-Saving, sound, Robux monetization, tutorial beyond one line of text, settings, daily rewards, achievements, player stats
-screen, phone layout, controller support, a rebirth/prestige system if the design wants one.
+Sound, Robux monetization (including gem packs), slime evolve/absorb, tutorial beyond one line of text, settings,
+achievements, player stats screen, phone layout, controller support, a rebirth/prestige system if the design wants one.
+(Daily rewards now exist as the Gems login streak, with no calendar screen yet.)
 
 ## Git state
 
-Last commit: "Working throw and slime animations". Not committed yet: the pull-up training loop, the shop catalog and
-`RequestPurchase`, `TrainingController`, `PullUpMotion` and these docs.
+Last commit: `c681014` "Pull up animation working. Working on the Power-System". Not committed yet: the rest of the
+power system, saving (`DataService`, `ProfileSerializer`), Gems, Auto-Throw and these doc updates.

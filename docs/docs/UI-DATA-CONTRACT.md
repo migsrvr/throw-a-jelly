@@ -13,6 +13,11 @@ The server sends the whole player state to the client every time something chang
 | Meaning | Field | Example |
 | --- | --- | --- |
 | Cash in the wallet | `Cash` | 1250 |
+| Gems (premium currency) in the wallet | `Gems` | 35 |
+| Index milestones already paid (0-5) | `IndexMilestonesClaimed` | 1 |
+| Highest zone a throw has landed in (0 = never thrown) | `HighestZoneReached` | 2 |
+| Daily login streak in days (0 = never claimed) | `DailyStreak` | 3 |
+| Is this session being saved (false = load failed or Studio without API access) | `ProgressSaved` | true |
 | Strength used by the throw (after boosts and equipped slime) | `EffectiveThrowPower` | 96 |
 | Raw strength gained from training | `BaseThrowPower` | 80 |
 | Power upgrade level | `PowerUpgradeLevel` | 3 |
@@ -52,12 +57,13 @@ The shop's content is produced by one function from the player information above
 | Meaning | Field | Example |
 | --- | --- | --- |
 | Item id (use this to buy) | `Id` | `boost_double_cash` |
-| Group | `Category` | Upgrade, Boost, Egg, Gift |
+| Group | `Category` | Upgrade, Boost, Egg, Gift, Gem |
 | Icon and accent colour (placeholders) | `Icon`, `Color` | 💵, blue |
 | Title | `Title` | x2 Cash |
 | One-line description | `Subtitle` | Double cash from every slime! |
 | Price as a number | `Price` | 500 |
-| Price as display text | `PriceText` | `500`, `FREE`, `OWNED`, `MAX`, `CLAIMED` |
+| Which wallet pays | `PriceKind` | `Cash` or `Gems` |
+| Price as display text | `PriceText` | `$500`, `💎 150`, `FREE`, `OWNED`, `MAX`, `CLAIMED` |
 | State | `State` | `Available`, `Unaffordable`, `Owned`, `Maxed`, `Claimed` |
 | Buy buttons this item offers | `Options` (list) | Buy x1 / Buy x3 |
 
@@ -80,7 +86,7 @@ The UI asks, the server decides. A refused request does nothing except send back
 | Equip a zone trail | `RequestEquipTrail` | zone number 1-5 | needs 100% of the zone |
 | Collect cash at the pad | `RequestCollect` | nothing | no button yet; today the pad is collected by walking onto it |
 | Teleport to throw line or plot | `RequestTeleport` | "ThrowLine" or "Plot" | no button exists yet |
-| Throw | `RequestThrow` | meter value 0-1 | sent automatically by the throw animation |
+| Throw | `RequestThrow` | meter value 0-1, and `Auto = true` for Auto-Throw | sent automatically by the throw animation; auto throws need the `auto_throw` boost and always use the fixed Auto-Throw meter value |
 | Stop pull-up training | `RequestStopTraining` | nothing | also happens on jump/walk |
 
 Starting and stopping training itself is the **E key / interaction prompt on the bar** (the game's built-in
@@ -90,11 +96,11 @@ prompt system), not a request the UI sends. A custom on-screen button would need
 
 | What happened | Event name | What it contains | Today's reaction |
 | --- | --- | --- | --- |
-| Show a message | `ToastNotify` | message text, kind (`info`, `success`, `warn`, `cash`, `power`) | yellow/red/green banner at top |
+| Show a message | `ToastNotify` | message text, kind (`info`, `success`, `warn`, `cash`, `power`, `gems`) | yellow/red/green/blue banner at top; `gems` is used for the daily reward |
 | Player state changed | `PlayerStateSync` | the player information in section 1 | all screens refresh |
 | Training started or stopped | `TrainingState` | active yes/no, seconds per rep | plays/stops the animation |
 | A pull-up rep was paid | `TrainingRep` | power gained, new total, seconds per rep | floating "+X" |
-| Someone threw | `ThrowBroadcast` | origin, luck, zone landed, caught slime (id, name, mutation, income), "1 in X", super lucky, new discovery, cash earned | flight HUD and reveal cutscene |
+| Someone threw | `ThrowBroadcast` | origin, luck (meter, bait, `BoostLuck` from Lucky Charm), zone landed, caught slime (id, name, mutation, income), "1 in X", super lucky, new discovery, cash earned, Gems earned (`GemsEarned` total, split into `GemsFromCatch`, `GemsFromZone`, `GemsFromIndex`), `IsAuto` | flight HUD and reveal cutscene; the reveal shows "+N 💎" next to the income |
 
 Message kinds `success` and `info` currently look the same (yellow); `power` has no colour of its own. A designer
 can give each kind its own look.

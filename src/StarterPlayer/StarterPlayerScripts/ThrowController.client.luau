@@ -137,6 +137,47 @@ tapPromptLabel.Text = "TAP TO THROW!"
 tapPromptLabel.Parent = meterRoot
 addStroke(tapPromptLabel, Color3.fromRGB(15, 18, 25), 3.2)
 
+-- Auto-Throw toggle (Gem unlock "auto_throw"): shown at the throw line once owned. While ON, the
+-- controller throws by itself after AutoThrow.IdleDelaySeconds idle, at the fixed AutoThrow meter ratio.
+local ownsAutoThrow = false
+local autoThrowEnabled = false
+local autoIdleClock = 0
+
+local autoThrowLabel: TextLabel? = nil
+local function refreshAutoThrowButton()
+	if autoThrowLabel then
+		autoThrowLabel.Text = if autoThrowEnabled then "🤖 AUTO: ON" else "🤖 AUTO: OFF"
+	end
+end
+local autoThrowButton, _, autoLabel = UiKit.CreateBevelButton({
+	Name = "AutoThrowToggle",
+	Parent = throwGui,
+	AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.new(0.5, 0, 0.48, 182),
+	Size = UDim2.fromOffset(190, 44),
+	Color = Color3.fromRGB(80, 210, 230),
+	CornerRadius = 11,
+	Text = "🤖 AUTO: OFF",
+	TextSize = 20,
+	OnClick = function()
+		autoThrowEnabled = not autoThrowEnabled
+		autoIdleClock = 0
+		refreshAutoThrowButton()
+	end,
+})
+autoThrowLabel = autoLabel
+autoThrowButton.Visible = false
+
+Remotes.GetEvent("PlayerStateSync").OnClientEvent:Connect(function(state: any)
+	if type(state) == "table" and type(state.OwnedBoosts) == "table" then
+		ownsAutoThrow = state.OwnedBoosts.auto_throw == true
+		if not ownsAutoThrow then
+			autoThrowEnabled = false
+			refreshAutoThrowButton()
+		end
+	end
+end)
+
 -- ============================================================================
 -- 2. MID-AIR FLIGHT HUD ("1.XXx LUCK" + ZONE BANNER)
 -- ============================================================================
@@ -426,7 +467,7 @@ local function showPerfectCallout(bonusPower: number)
 	end)
 end
 
-local function triggerThrowFromMeter()
+local function triggerThrowFromMeter(isAuto: boolean?)
 	if isThrowInFlight or inRevealCutscene then
 		return
 	end
@@ -437,8 +478,10 @@ local function triggerThrowFromMeter()
 	lastThrowTime = now
 	isThrowInFlight = true
 	meterRoot.Visible = false
+	autoThrowButton.Visible = false
 
-	local lockedRatio = currentMeterRatio
+	-- Auto throws always stop at the fixed AutoThrow ratio (the server enforces the same value)
+	local lockedRatio = if isAuto then GameConfig.AutoThrow.MeterRatio else currentMeterRatio
 	local lockedSeg = GameConfig.EvaluateMeterRatio(lockedRatio)
 	if lockedSeg.IsPerfect then
 		showPerfectCallout(lockedSeg.BonusPower)
@@ -466,6 +509,7 @@ local function triggerThrowFromMeter()
 			ChargeRatio = lockedRatio,
 			PitchDeg = GameConfig.Physics.DefaultPitchDeg,
 			YawDeg = 0,
+			Auto = isAuto == true,
 		})
 	end, function()
 		isPitchAnimating = false
@@ -778,7 +822,9 @@ local function runRevealCutscene(finalPos: Vector3, baitModel: Model, payload: a
 	mutationLabel.TextColor3 = mutColor
 	revealedNameLabel.Text = shortWord
 	revealedNameLabel.TextColor3 = SlimeFactory.ToColor3(def.Color)
-	revealedIncomeLabel.Text = `$${GameConfig.FormatNumber(payload.CaughtIncomePerSec or def.IncomePerSec)}/s`
+	local gemsEarned = tonumber(payload.GemsEarned) or 0
+	revealedIncomeLabel.Text = `${GameConfig.FormatNumber(payload.CaughtIncomePerSec or def.IncomePerSec)}/s`
+		.. if gemsEarned > 0 then `   +{gemsEarned} 💎` else ""
 	newBadge.Visible = (payload.IsNewDiscovery == true)
 	finalInfoFrame.Visible = true
 
@@ -844,7 +890,8 @@ throwBroadcast.OnClientEvent:Connect(function(payload: any)
 	-- Live luck ticker: replays the server's GameConfig.ComputeFlightLuck as the bait flies, so the
 	-- top-centre "1.XXx LUCK" climbs with distance and ends exactly on the server's LuckMultiplier.
 	local meterLuck = tonumber(payload.MeterLuck) or tonumber(payload.LuckMultiplier) or 1.0
-	local baitLuck = tonumber(payload.BaitLuck) or 1.0
+	-- Gem luck boosts (Lucky Charm) are folded into the bait factor, exactly as ThrowService does
+	local baitLuck = (tonumber(payload.BaitLuck) or 1.0) * (tonumber(payload.BoostLuck) or 1.0)
 	local finalLuck = tonumber(payload.LuckMultiplier) or 1.0
 	local maxDistance = 0
 	if isLocal then
@@ -939,8 +986,21 @@ RunService.RenderStepped:Connect(function(dt: number)
 		sliderBar.Position = UDim2.fromScale(0.5, yScale)
 		sliderBonusLabel.Text = `+{segDef.BonusPower}`
 		sliderBonusLabel.TextColor3 = SlimeFactory.ToColor3(segDef.Color)
+
+		autoThrowButton.Visible = ownsAutoThrow
+		if ownsAutoThrow and autoThrowEnabled then
+			autoIdleClock += dt
+			if autoIdleClock >= GameConfig.AutoThrow.IdleDelaySeconds then
+				autoIdleClock = 0
+				triggerThrowFromMeter(true)
+			end
+		else
+			autoIdleClock = 0
+		end
 	else
 		meterRoot.Visible = false
+		autoThrowButton.Visible = false
+		autoIdleClock = 0
 		if not isThrowInFlight then
 			CharacterAnimator.StopAimPose()
 		end

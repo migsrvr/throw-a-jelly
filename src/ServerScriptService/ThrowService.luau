@@ -40,9 +40,17 @@ function ThrowService.Init()
 		local meterRatio = 0.75
 		local pitchDeg = GameConfig.Physics.DefaultPitchDeg
 		local yawDeg = 0
+		local isAuto = type(payload) == "table" and payload.Auto == true
+
+		-- Auto-Throw is a Gem unlock; auto throws always use the fixed AutoThrow meter ratio
+		if isAuto and not profile.OwnedBoosts.auto_throw then
+			return
+		end
 
 		if type(payload) == "table" then
-			if type(payload.ChargeRatio) == "number" then
+			if isAuto then
+				meterRatio = GameConfig.AutoThrow.MeterRatio
+			elseif type(payload.ChargeRatio) == "number" then
 				meterRatio = math.clamp(payload.ChargeRatio, 0, 1)
 			end
 			if type(payload.PitchDeg) == "number" then
@@ -77,8 +85,11 @@ function ThrowService.Init()
 
 		-- Luck = distance down the lane x meter band x Jelly Bait quality (authoritative; the client ticker
 		-- only replays this with GameConfig.ComputeFlightLuck during the flight)
+		-- Gem luck boosts (Lucky Charm) multiply on top, folded into the bait factor so the ticker matches.
 		local baitDef = ProgressionLogic.GetBaitDef(profile)
-		local totalLuck = GameConfig.ComputeFlightLuck(simResult.Distance, meterSeg.LuckMultiplier, baitDef.LuckMultiplier)
+		local boostLuck = ProgressionLogic.GetBoostLuckMultiplier(profile)
+		local totalLuck =
+			GameConfig.ComputeFlightLuck(simResult.Distance, meterSeg.LuckMultiplier, baitDef.LuckMultiplier * boostLuck)
 
 		-- Put newly caught slime into Hotbar (UnplacedSlimes) so the player can equip & place it (Clip 1/2 flow!)
 		local reward = ProgressionLogic.EvaluateThrowReward(
@@ -107,6 +118,8 @@ function ThrowService.Init()
 			LuckMultiplier = totalLuck,
 			MeterLuck = meterSeg.LuckMultiplier,
 			BaitLuck = baitDef.LuckMultiplier,
+			BoostLuck = boostLuck,
+			IsAuto = isAuto,
 			BaitTier = profile.BaitTier,
 			BaitName = baitDef.Name,
 			IsPerfect = meterSeg.IsPerfect == true,
@@ -133,6 +146,10 @@ function ThrowService.Init()
 			IsNewDiscovery = reward.IsNewDiscovery,
 			AutoPlaced = reward.AutoPlaced,
 			IsNewBest = reward.IsNewBestDistance,
+			GemsEarned = reward.Gems.Total,
+			GemsFromCatch = reward.Gems.FromCatch,
+			GemsFromZone = reward.Gems.FromZone,
+			GemsFromIndex = reward.Gems.FromIndex,
 		})
 	end)
 end

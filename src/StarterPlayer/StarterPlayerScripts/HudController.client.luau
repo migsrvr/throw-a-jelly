@@ -43,10 +43,10 @@ local function buyShopItem(itemId: string, quantity: (number | string)?)
 	requestPurchase:FireServer({ ItemId = itemId, Quantity = quantity or 1 })
 end
 
-type ShopLabelBinding = { Label: TextLabel, ItemId: string, OptionIndex: number, Style: "Row" | "Option" }
+type ShopLabelBinding = { Label: TextLabel, ItemId: string, OptionIndex: number, Style: "Row" | "RowWide" | "Option" }
 local shopLabelBindings: { ShopLabelBinding } = {}
 
-local function bindShopLabel(label: TextLabel?, itemId: string, optionIndex: number, style: "Row" | "Option")
+local function bindShopLabel(label: TextLabel?, itemId: string, optionIndex: number, style: "Row" | "RowWide" | "Option")
 	if label then
 		table.insert(shopLabelBindings, { Label = label, ItemId = itemId, OptionIndex = optionIndex, Style = style })
 	end
@@ -62,6 +62,7 @@ end
 
 local currentState: any = {
 	Cash = 0,
+	Gems = 0,
 	EffectiveThrowPower = 5,
 	PowerUpgradeLevel = 1,
 	NextPowerCost = 25,
@@ -160,6 +161,7 @@ toastNotify.OnClientEvent:Connect(function(payload: any)
 		local col = if kind == "warn"
 			then Color3.fromRGB(255, 110, 110)
 			elseif kind == "cash" then Color3.fromRGB(105, 255, 130)
+			elseif kind == "gems" then Color3.fromRGB(120, 200, 255)
 			else Color3.fromRGB(255, 235, 95)
 		showToast(payload.Message, col)
 	end
@@ -231,7 +233,7 @@ local bottomLeftStats = Instance.new("Frame")
 bottomLeftStats.Name = "BottomLeftStats"
 bottomLeftStats.AnchorPoint = Vector2.new(0, 1)
 bottomLeftStats.Position = UDim2.new(0, 18, 1, -16)
-bottomLeftStats.Size = UDim2.fromOffset(230, 80)
+bottomLeftStats.Size = UDim2.fromOffset(230, 120)
 bottomLeftStats.BackgroundTransparency = 1
 bottomLeftStats.Parent = screenGui
 
@@ -258,6 +260,19 @@ cashRowLabel.TextColor3 = Color3.fromRGB(85, 245, 95)
 cashRowLabel.Text = "💵 $0"
 cashRowLabel.Parent = bottomLeftStats
 addStroke(cashRowLabel, Color3.fromRGB(15, 18, 25), 3)
+
+local gemsRowLabel = Instance.new("TextLabel")
+gemsRowLabel.Name = "GemsRow"
+gemsRowLabel.Position = UDim2.fromOffset(0, 80)
+gemsRowLabel.Size = UDim2.fromOffset(230, 38)
+gemsRowLabel.BackgroundTransparency = 1
+gemsRowLabel.Font = Enum.Font.FredokaOne
+gemsRowLabel.TextSize = 32
+gemsRowLabel.TextXAlignment = Enum.TextXAlignment.Left
+gemsRowLabel.TextColor3 = Color3.fromRGB(120, 200, 255)
+gemsRowLabel.Text = "💎 0"
+gemsRowLabel.Parent = bottomLeftStats
+addStroke(gemsRowLabel, Color3.fromRGB(15, 18, 25), 3)
 
 -- ============================================================================
 -- 4. BOTTOM-CENTER HOTBAR ([1]..[5]) WITH 3D VIEWPORTFRAME SLIMES
@@ -578,18 +593,21 @@ end
 
 -- Upgrades & Boosts Row in Shop
 local upgradesCard = Instance.new("Frame")
-upgradesCard.Size = UDim2.new(1, -10, 0, 116)
+upgradesCard.Size = UDim2.new(1, -10, 0, 168)
 upgradesCard.BackgroundColor3 = Color3.fromRGB(46, 52, 66)
 upgradesCard.Parent = shopScroll
 addCorner(upgradesCard, 12)
 addStroke(upgradesCard, Color3.fromRGB(18, 20, 28), 2.2, Enum.ApplyStrokeMode.Border)
 
 -- Upgrade/boost buttons: layout is UI's choice; which item each button buys is just a catalog id.
-local UPGRADE_ROW_LAYOUT: { { ItemId: string, Position: UDim2 } } = {
+local HALF_WIDTH = UDim2.new(0.5, -18, 0, 40)
+local UPGRADE_ROW_LAYOUT: { { ItemId: string, Position: UDim2, Size: UDim2? } } = {
 	{ ItemId = "power_upgrade", Position = UDim2.fromOffset(12, 12) },
 	{ ItemId = "pullup_tier", Position = UDim2.new(0.5, 6, 0, 12) },
 	{ ItemId = "boost_double_cash", Position = UDim2.fromOffset(12, 64) },
 	{ ItemId = "boost_double_power", Position = UDim2.new(0.5, 6, 0, 64) },
+	-- Jelly Bait quality: shows next bait name + current -> next Luck (from the listing subtitle)
+	{ ItemId = "bait_tier", Position = UDim2.fromOffset(12, 116), Size = UDim2.new(1, -24, 0, 40) },
 }
 for _, slot in UPGRADE_ROW_LAYOUT do
 	local item = GameConfig.ShopCatalogById[slot.ItemId]
@@ -598,7 +616,7 @@ for _, slot in UPGRADE_ROW_LAYOUT do
 			Name = `Buy_{item.Id}`,
 			Parent = upgradesCard,
 			Position = slot.Position,
-			Size = UDim2.new(0.5, -18, 0, 40),
+			Size = slot.Size or HALF_WIDTH,
 			Color = SlimeFactory.ToColor3(item.Color),
 			CornerRadius = 9,
 			Text = item.Icon,
@@ -607,8 +625,53 @@ for _, slot in UPGRADE_ROW_LAYOUT do
 				buyShopItem(item.Id, 1)
 			end,
 		})
-		bindShopLabel(lbl, item.Id, 1, "Row")
+		bindShopLabel(lbl, item.Id, 1, if slot.Size then "RowWide" else "Row")
 	end
+end
+
+-- Gem Shop card: every catalog item with Category "Gem" (paid from the 💎 wallet), one wide row each
+local gemItems: { GameConfig.ShopCatalogItem } = {}
+for _, item in GameConfig.ShopCatalog do
+	if item.Category == "Gem" then
+		table.insert(gemItems, item)
+	end
+end
+
+local gemCard = Instance.new("Frame")
+gemCard.Name = "GemShopCard"
+gemCard.Size = UDim2.new(1, -10, 0, 52 + #gemItems * 52)
+gemCard.BackgroundColor3 = Color3.fromRGB(40, 50, 72)
+gemCard.Parent = shopScroll
+addCorner(gemCard, 12)
+addStroke(gemCard, Color3.fromRGB(18, 20, 28), 2.2, Enum.ApplyStrokeMode.Border)
+
+local gemCardTitle = Instance.new("TextLabel")
+gemCardTitle.Position = UDim2.fromOffset(14, 8)
+gemCardTitle.Size = UDim2.new(1, -28, 0, 36)
+gemCardTitle.BackgroundTransparency = 1
+gemCardTitle.Font = Enum.Font.FredokaOne
+gemCardTitle.TextSize = 24
+gemCardTitle.TextXAlignment = Enum.TextXAlignment.Left
+gemCardTitle.TextColor3 = Color3.fromRGB(120, 200, 255)
+gemCardTitle.Text = "💎 GEM SHOP"
+gemCardTitle.Parent = gemCard
+addStroke(gemCardTitle, Color3.fromRGB(15, 18, 25), 2.2)
+
+for i, item in gemItems do
+	local _, _, lbl = UiKit.CreateBevelButton({
+		Name = `Buy_{item.Id}`,
+		Parent = gemCard,
+		Position = UDim2.fromOffset(12, 52 + (i - 1) * 52),
+		Size = UDim2.new(1, -24, 0, 40),
+		Color = SlimeFactory.ToColor3(item.Color),
+		CornerRadius = 9,
+		Text = item.Icon,
+		TextSize = 16,
+		OnClick = function()
+			buyShopItem(item.Id, 1)
+		end,
+	})
+	bindShopLabel(lbl, item.Id, 1, "RowWide")
 end
 
 -- Free Slime Claim Card with 3D ViewportFrame preview (Clip 2 00:15)
@@ -669,7 +732,14 @@ local function refreshShopLabels()
 		if entry then
 			local opt = entry.Options[b.OptionIndex]
 			local soldOut = entry.State == "Owned" or entry.State == "Maxed" or entry.State == "Claimed"
-			if b.Style == "Row" then
+			if b.Style == "RowWide" then
+				-- Wide rows have room for the subtitle (e.g. bait "Luck 1x -> 1.35x")
+				-- Maxed rows say why in the subtitle; owned/claimed rows just show the name + OWNED
+				b.Label.Text = if entry.State == "Maxed"
+					then `{entry.Icon} {entry.Subtitle}`
+					elseif soldOut then `{entry.Icon} {entry.Title} — {entry.PriceText}`
+					else `{entry.Icon} {entry.Title} ({entry.Subtitle}) — {entry.PriceText}`
+			elseif b.Style == "Row" then
 				b.Label.Text = if soldOut
 					then `{entry.Icon} {entry.Title} ({entry.PriceText})`
 					else `{entry.Icon} {entry.Title} — {entry.PriceText}`
@@ -1137,7 +1207,8 @@ end
 
 local function refreshAllUi()
 	powerRowLabel.Text = `💪 {GameConfig.FormatNumber(currentState.EffectiveThrowPower or 5)}`
-	cashRowLabel.Text = `💵 $${GameConfig.FormatNumber(currentState.Cash or 0)}`
+	cashRowLabel.Text = `💵 ${GameConfig.FormatNumber(currentState.Cash or 0)}`
+	gemsRowLabel.Text = `💎 {GameConfig.FormatNumber(currentState.Gems or 0)}`
 
 	refreshShopLabels()
 

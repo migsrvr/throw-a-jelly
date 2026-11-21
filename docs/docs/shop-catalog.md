@@ -19,7 +19,7 @@ identical everywhere (rate limit, toast, sync).
 | Prices / names / effects (single source of truth) | `GameConfig.PullUpTiers`, `ShopBoosts`, `ShopEggs`, `Slots`, `GetPowerUpgradeCost`, `FreeGift` |
 | Labels, prices, states for the UI | `ProgressionLogic.GetShopListing(state)` / `GetShopListingEntry(state, id)` |
 | Buying | `ProgressionLogic.Purchase(profile, itemId, quantity)` |
-| Tests | `tests/ProgressionLogic.spec.luau` ("Shop Catalog, Listing & Purchase API") |
+| Tests | `tests/ProgressionLogic.spec.luau` ("Shop Catalog, Listing & Purchase API"), `tests/Gems.spec.luau` (Gem items) |
 
 ## For UI work
 
@@ -59,5 +59,17 @@ Anything else is rejected without charging.
   `Action = "Boost", Args = { BoostId = "..." }`.
 - **New kind of purchase**: add an `Action` value to `GameConfig.ShopAction`, handle it in `buildListingEntry` and
   `ProgressionLogic.Purchase`, and add a test.
-- **Robux later**: `PriceKind` is reserved for this. A `"Robux"` item would be granted from a
-  `MarketplaceService.ProcessReceipt` handler that calls the same reducers.
+- **New Gem item**: set `PriceKind = "Gems"` on the catalog row (and `Category = "Gem"` so it shows in the Gem
+  Shop card). Boosts carry their own `PriceKind` in `ShopBoosts`, and a test checks the catalog row matches it.
+  The listing then reports `PriceKind = "Gems"`, shows `💎 N`, and checks affordability against `Gems`.
+- **Robux later**: a `"Robux"` `PriceKind` would be granted from a `MarketplaceService.ProcessReceipt` handler
+  that calls the same reducers (and must save the profile before returning `PurchaseGranted`).
+
+## Wallets
+
+| `PriceKind` | Paid from | Example items |
+| --- | --- | --- |
+| `Cash` | `profile.Cash` | power upgrade, bars, bait, eggs, x2 boosts, +4 slots ($5K) |
+| `Gems` | `profile.Gems` | Auto-Throw, Lucky Charm, +4 slots (60 Gems) |
+
+The +4 slot unlock exists twice (`slot_expansion` for Cash, `gem_slot_expansion` for Gems); buying either one maxes both.

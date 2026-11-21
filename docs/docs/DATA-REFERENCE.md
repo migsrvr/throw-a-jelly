@@ -72,30 +72,80 @@ A mutation is a bonus variant that any slime can roll. It tints the slime and mu
 ## Throw meter segments (9)
 
 The vertical meter has nine coloured bands. Where the slider stops decides the bonus. Bottom = band 1 (worst).
+Stopping in the top band is a **PERFECT!** throw: a gold "PERFECT! +20" callout plus the biggest power bonus.
 
-| Band | Colour | Bonus Throw Power | Luck multiplier |
-| --- | --- | --- | --- |
-| 1 | #EB4137 | +1 | 1.00x |
-| 2 | #F56932 | +3 | 1.03x |
-| 3 | #FA9132 | +5 | 1.06x |
-| 4 | #FFB937 | +8 | 1.10x |
-| 5 | #F5DC3C | +11 | 1.15x |
-| 6 | #CDEB41 | +14 | 1.22x |
-| 7 | #A0F04B | +17 | 1.32x |
-| 8 | #73F555 | +21 | 1.48x |
-| 9 | #46FA69 | +25 | 1.75x |
+| Band | Colour | Bonus Throw Power | Luck multiplier | Callout |
+| --- | --- | --- | --- | --- |
+| 1 | #EB4137 | +1 | 1.00x |  |
+| 2 | #F56932 | +3 | 1.03x |  |
+| 3 | #FA9132 | +5 | 1.06x |  |
+| 4 | #FFB937 | +7 | 1.10x |  |
+| 5 | #F5DC3C | +9 | 1.15x |  |
+| 6 | #CDEB41 | +12 | 1.22x |  |
+| 7 | #A0F04B | +14 | 1.32x |  |
+| 8 | #73F555 | +17 | 1.48x |  |
+| 9 | #46FA69 | +20 | 1.75x | PERFECT! |
+
+## Flight luck
+
+Luck decides how likely rarer slimes and mutations are. It is shown live as "1.XXx LUCK" while the bait flies,
+and climbs the further the bait goes: +1.00x for every 350 studs, multiplied by the meter band luck and the Jelly Bait luck.
+
+| Bait \ distance | 240 studs | 480 studs | 720 studs | 960 studs | 1200 studs |
+| --- | --- | --- | --- | --- | --- |
+| Carrot Jelly | 1.69x | 2.37x | 3.06x | 3.74x | 4.43x |
+| Berry Jelly | 2.28x | 3.20x | 4.13x | 5.05x | 5.98x |
+| Crystal Honey | 3.12x | 4.39x | 5.66x | 6.92x | 8.19x |
+| Magma Tart | 4.38x | 6.17x | 7.95x | 9.73x | 11.51x |
+| Starlight Cake | 6.74x | 9.49x | 12.23x | 14.97x | 17.71x |
+
+(Table uses meter band 1. A PERFECT throw multiplies every value by the top band's luck.)
+
+## Jelly Bait tiers (5)
+
+Bought in the Shop. Better bait does not throw further; it multiplies the luck of every throw.
+
+| Tier | Name | Cost | Luck multiplier | Colour |
+| --- | --- | --- | --- | --- |
+| 1 | Carrot Jelly | (starting bait) | 1.00x | #FF7D28 |
+| 2 | Berry Jelly | $150 | 1.35x | #C846A0 |
+| 3 | Crystal Honey | $900 | 1.85x | #FFCD46 |
+| 4 | Magma Tart | $4.5K | 2.60x | #FF5F2D |
+| 5 | Starlight Cake | $22.0K | 4.00x | #AA96FF |
 
 ## Pull-up bar tiers (5)
 
-Training on the bar adds Throw Power. A better bar gives more power per rep and also does reps faster.
+Training on the bar gives Training XP. A better bar gives more XP per rep and also does reps faster.
 
-| Tier | Name | Upgrade cost | Power per rep | Rep speed multiplier |
+| Tier | Name | Upgrade cost | XP per rep | Rep speed multiplier |
 | --- | --- | --- | --- | --- |
 | 1 | PULL-UP BAR | (starting bar) | +2 | x1 |
 | 2 | IRON BAR | $75 | +8 | x1.15 |
 | 3 | CRYSTAL BAR | $450 | +32 | x1.3 |
 | 4 | MAGMA BAR | $2.5K | +140 | x1.5 |
 | 5 | STARLIGHT BAR | $15.0K | +600 | x1.75 |
+
+### Strength levels
+
+Training XP fills a level bar. Every level up gives **+5 Throw Power** and a "LEVEL UP!" popup.
+While training, a **BONUS REP!** button pops up every 4-6 seconds; clicking it within 2.5s gives 3x the XP of one rep.
+
+| Level | XP to next level | Total XP from level 1 | Throw Power from levels |
+| --- | --- | --- | --- |
+| 1 | 10 | 0 | +0 |
+| 2 | 25 | 10 | +5 |
+| 3 | 44 | 35 | +10 |
+| 4 | 64 | 79 | +15 |
+| 5 | 87 | 143 | +20 |
+| 6 | 112 | 230 | +25 |
+| 7 | 138 | 342 | +30 |
+| 8 | 165 | 480 | +35 |
+| 9 | 194 | 645 | +40 |
+| 10 | 223 | 839 | +45 |
+| 20 | 570 | 4.6K | +95 |
+| 30 | 986 | 12.1K | +145 |
+| 40 | 1.5K | 24.0K | +195 |
+| 50 | 2.0K | 40.8K | +245 |
 
 ### How long one pull-up takes
 
@@ -117,23 +167,31 @@ The rep animation is played at exactly this speed.
 
 These are the shop's building blocks. A button or card in the shop = one row here.
 
-| Item id | Group | Icon | What it does | Colour |
-| --- | --- | --- | --- | --- |
-| power_upgrade | Upgrade | ⚡ | Raises Throw Power by one upgrade level (price grows each level) | #EB962D |
-| pullup_tier | Upgrade | 💪 | Upgrades the pull-up bar to the next tier | #379BF0 |
-| slot_expansion | Upgrade | 🧺 | Adds 4 more slime slots to the plot (8 to 12) | #5FC878 |
-| boost_double_cash | Boost | 💵 | Permanent boost (see boosts below) | #2DB9EB |
-| boost_double_power | Boost | 💪 | Permanent boost (see boosts below) | #A55FF5 |
-| egg_enchanted | Egg | 🥚 | Hatches 1 or 3 slimes with the odds listed below | #AF6EFF |
-| egg_rainbow | Egg | 🌈 | Hatches 1 or 3 slimes with the odds listed below | #FF78C8 |
-| free_gift | Gift | 🎁 | One-time free slime | #FFCD37 |
+| Item id | Group | Icon | Paid with | What it does | Colour |
+| --- | --- | --- | --- | --- | --- |
+| power_upgrade | Upgrade | ⚡ | Cash | Raises Throw Power by one upgrade level (price grows each level) | #EB962D |
+| pullup_tier | Upgrade | 💪 | Cash | Upgrades the pull-up bar to the next tier | #379BF0 |
+| bait_tier | Upgrade | 🥕 | Cash | Upgrades the Jelly Bait to the next quality tier (more luck) | #FF7D28 |
+| slot_expansion | Upgrade | 🧺 | Cash | Adds 4 more slime slots to the plot (8 to 12); the Cash and Gem versions unlock the same slots | #5FC878 |
+| boost_double_cash | Boost | 💵 | Cash | Permanent boost (see boosts below) | #2DB9EB |
+| boost_double_power | Boost | 💪 | Cash | Permanent boost (see boosts below) | #A55FF5 |
+| egg_enchanted | Egg | 🥚 | Cash | Hatches 1 or 3 slimes with the odds listed below | #AF6EFF |
+| egg_rainbow | Egg | 🌈 | Cash | Hatches 1 or 3 slimes with the odds listed below | #FF78C8 |
+| free_gift | Gift | 🎁 | Cash | One-time free slime | #FFCD37 |
+| gem_auto_throw | Gem | 🤖 | Gems | Permanent boost (see boosts below) | #50D2E6 |
+| gem_lucky_charm | Gem | 🍀 | Gems | Permanent boost (see boosts below) | #5AE178 |
+| gem_slot_expansion | Gem | 🧺 | Gems | Adds 4 more slime slots to the plot (8 to 12); the Cash and Gem versions unlock the same slots | #5FC878 |
 
 ### Boosts
+
+All boosts are permanent once bought.
 
 | Name | Description | Price | Colour |
 | --- | --- | --- | --- |
 | x2 Cash | Double cash from every slime! | $500 | #41BEFF |
 | x2 Training Power | Double XP on every pull-up! | $750 | #A56EFF |
+| Auto-Throw | Throws for you while you stand at the throw line! | 150 Gems | #50D2E6 |
+| Lucky Charm | x1.5 Luck on every throw! | 120 Gems | #5AE178 |
 
 ### Eggs
 
@@ -165,5 +223,68 @@ These are the shop's building blocks. A button or card in the shop = one row her
 
 ## Plot slots
 
-Every plot starts with 8 slime slots; a one-time purchase of $5.0K unlocks all 12.
+Every plot starts with 8 slime slots; a one-time purchase of $5.0K (or 60 Gems) unlocks all 12.
+
+## Gems (premium currency)
+
+Shown as 💎 in the HUD and the shop. Earned slowly by playing; spent in the Gem Shop (see the Gem rows in the shop table).
+Buying Gems with Robux is planned but not built yet.
+
+### Index milestones (paid once each)
+
+| Slimes discovered | Gems |
+| --- | --- |
+| 3 | +10 |
+| 6 | +15 |
+| 9 | +25 |
+| 12 | +40 |
+| 15 | +75 |
+
+### First time reaching a zone (paid once per zone)
+
+A throw that lands in a zone for the first time pays that zone and every zone before it that wasn't paid yet.
+
+| Zone | Gems |
+| --- | --- |
+| 🌿 Meadow | +5 |
+| 💎 Crystal Cave | +15 |
+| 🌋 Lava Fields | +30 |
+| ❄️ Frost Peaks | +50 |
+| 🍬 Candy Land | +80 |
+
+### Daily login streak
+
+Claimed automatically once per day (UTC) when the player joins or is online at midnight. Missing a day restarts at day 1.
+After day 7 the streak keeps paying the day-7 amount.
+
+| Streak day | Gems |
+| --- | --- |
+| 1 | +5 |
+| 2 | +8 |
+| 3 | +10 |
+| 4 | +12 |
+| 5 | +15 |
+| 6 | +20 |
+| 7 | +35 |
+
+### Rare catches (throws only, not eggs)
+
+A caught slime pays its rarity amount plus its mutation amount. Anything not listed pays 0.
+
+| Rarity or mutation | Gems |
+| --- | --- |
+| Legendary | +3 |
+| Mythic | +8 |
+| CRYSTAL | +3 |
+| RAINBOW | +6 |
+
+### Auto-Throw
+
+Once bought, an AUTO toggle appears under the throw meter. While it's on, the player throws by itself after 0.8s at the throw line,
+always stopping the meter in band 5 (+9 power, 1.15x luck), so a PERFECT by hand is still better.
+
+## Saving
+
+Progress autosaves every 60 seconds, when the player leaves, and when the server shuts down.
+If a save can't be loaded, the player can still play but gets a "Progress can't be saved this session." message.
 
