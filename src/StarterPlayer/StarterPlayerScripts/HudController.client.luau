@@ -1011,8 +1011,9 @@ end
 
 RunService.RenderStepped:Connect(function()
 	local inCutscene = (localPlayer:GetAttribute("InRevealCutscene") :: boolean?) == true
-	screenGui.Enabled = not inCutscene
-	if inCutscene then
+	local inTraining = (localPlayer:GetAttribute("InTraining") :: boolean?) == true
+	screenGui.Enabled = not inCutscene and not inTraining
+	if inCutscene or inTraining then
 		return
 	end
 

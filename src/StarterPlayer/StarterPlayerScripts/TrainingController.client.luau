@@ -28,7 +28,9 @@ local CharacterAnimator = require(Shared:WaitForChild("CharacterAnimator"))
 local GameConfig = require(Shared:WaitForChild("GameConfig"))
 local PullUpMotion = require(Shared:WaitForChild("PullUpMotion"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
+local UiAssets = require(Shared:WaitForChild("UiAssets"))
 local UiKit = require(Shared:WaitForChild("UiKit"))
+local UiLayout = require(Shared:WaitForChild("UiLayout"))
 
 local trainingState = Remotes.GetEvent("TrainingState")
 local trainingRep = Remotes.GetEvent("TrainingRep")
@@ -358,93 +360,212 @@ hudGui.Enabled = false
 hudGui.Parent = playerGui
 UiKit.AttachResponsiveScale(hudGui)
 
+local isPhone = UiKit.IsPhone()
+local CARD_TONE: UiKit.Tri = {
+	Light = Color3.fromRGB(44, 46, 55),
+	Mid = Color3.fromRGB(36, 37, 45),
+	Dark = Color3.fromRGB(27, 28, 34),
+}
+-- Bar tier pill gradients (spec 3f): Pull-Up grey, Iron steel, Crystal blue, Magma orange, Starlight violet
+local TIER_TONES: { UiKit.Tri } = {
+	UiKit.Gradients.Grey,
+	UiKit.TriFromColor(Color3.fromRGB(140, 160, 185), 0.4, 0.3),
+	UiKit.Gradients.Blue,
+	UiKit.Gradients.Orange,
+	UiKit.Gradients.SlimesNav,
+}
+
+local function makeLabel(parent: Instance, size: number, text: string, align: Enum.TextXAlignment?): TextLabel
+	local l = Instance.new("TextLabel")
+	l.BackgroundTransparency = 1
+	l.Font = Enum.Font.FredokaOne
+	l.TextSize = size
+	l.TextColor3 = Color3.fromRGB(255, 255, 255)
+	l.Text = text
+	l.TextXAlignment = align or Enum.TextXAlignment.Center
+	l.Parent = parent
+	UiKit.AddTextStroke(l)
+	return l
+end
+
+local function makeCard(parent: Instance, size: UDim2, position: UDim2): Frame
+	local f = Instance.new("Frame")
+	f.Size = size
+	f.Position = position
+	f.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	f.Parent = parent
+	UiKit.AddCorner(f, 18)
+	UiKit.ApplyTri(f, CARD_TONE)
+	UiKit.AddFrameOutline(f, 4)
+	return f
+end
+
+-- Top centre: bar tier pill + hint (PC only)
+local tierPill = Instance.new("Frame")
+tierPill.Name = "TierPill"
+tierPill.AnchorPoint = Vector2.new(0.5, 0)
+tierPill.Position = UDim2.new(0.5, 0, 0, 20)
+tierPill.Size = UDim2.fromOffset(300, 52)
+tierPill.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+tierPill.Parent = hudGui
+UiKit.AddCorner(tierPill, 26)
+UiKit.ApplyTri(tierPill, TIER_TONES[1])
+UiKit.AddFrameOutline(tierPill, 4)
+UiKit.AddStripes(tierPill, 26)
+local tierLabel = makeLabel(tierPill, 28, "PULL-UP BAR")
+tierLabel.Size = UDim2.fromScale(1, 1)
+tierLabel.ZIndex = 3
+
+local stopHint = makeLabel(hudGui, 18, "Jump or walk away to stop")
+stopHint.AnchorPoint = Vector2.new(0.5, 0)
+stopHint.Position = UDim2.new(0.5, 0, 0, 78)
+stopHint.Size = UDim2.fromOffset(320, 24)
+stopHint.Visible = not isPhone
+
+-- Left panel: "This session"
+local sessionPanel = makeCard(hudGui, UDim2.fromOffset(290, 214), UDim2.fromOffset(16, 86))
+sessionPanel.Name = "SessionPanel"
+local sessionHeader = Instance.new("Frame")
+sessionHeader.Size = UDim2.new(1, 0, 0, 44)
+sessionHeader.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+sessionHeader.Parent = sessionPanel
+UiKit.AddCorner(sessionHeader, 18)
+UiKit.ApplyTri(sessionHeader, UiKit.Gradients.Blue)
+UiKit.AddStripes(sessionHeader, 18)
+local sessionTitle = makeLabel(sessionHeader, 24, "This session")
+sessionTitle.Size = UDim2.fromScale(1, 1)
+sessionTitle.ZIndex = 3
+
+local sessionValues: { [string]: TextLabel } = {}
+local sessionRows = { { "Reps", "Reps" }, { "Power", "Power gained" }, { "Speed", "Speed" }, { "Xp", "XP per second" } }
+for i, def in sessionRows do
+	local name = makeLabel(sessionPanel, 18, def[2], Enum.TextXAlignment.Left)
+	name.Position = UDim2.fromOffset(16, 52 + (i - 1) * 40)
+	name.Size = UDim2.fromOffset(150, 36)
+	name.TextColor3 = Color3.fromRGB(215, 220, 232)
+	local value = makeLabel(sessionPanel, 22, "0", Enum.TextXAlignment.Right)
+	value.Position = UDim2.new(1, -150, 0, 52 + (i - 1) * 40)
+	value.Size = UDim2.fromOffset(134, 36)
+	sessionValues[def[1]] = value
+end
+UiKit.ApplyTri(sessionValues.Power, UiKit.Gradients.Power)
+UiKit.ApplyTri(sessionValues.Xp, UiKit.Gradients.Cash)
+
+-- Right panel: NEXT BAR + UPGRADE (or MAX BAR)
+local nextPanel = makeCard(hudGui, UDim2.fromOffset(270, 176), UDim2.new(1, -286, 0, 86))
+nextPanel.Name = "NextBarPanel"
+local nextKicker = makeLabel(nextPanel, 16, "NEXT BAR")
+nextKicker.Position = UDim2.fromOffset(8, 8)
+nextKicker.Size = UDim2.new(1, -16, 0, 20)
+nextKicker.TextColor3 = Color3.fromRGB(215, 220, 232)
+local nextName = makeLabel(nextPanel, 26, "IRON BAR")
+nextName.Position = UDim2.fromOffset(8, 28)
+nextName.Size = UDim2.new(1, -16, 0, 32)
+local nextGain = makeLabel(nextPanel, 17, "")
+nextGain.Position = UDim2.fromOffset(8, 62)
+nextGain.Size = UDim2.new(1, -16, 0, 24)
+UiKit.ApplyTri(nextGain, UiKit.Gradients.Cash)
+local upgradeBtn = UiKit.CreateGradientButton({
+	Name = "UpgradeBarBtn",
+	Parent = nextPanel,
+	AnchorPoint = Vector2.new(0.5, 1),
+	Position = UDim2.new(0.5, 0, 1, -12),
+	Size = UDim2.new(1, -24, 0, 62),
+	Kind = "green",
+	CornerRadius = 14,
+	Text = "UPGRADE",
+	TextSize = 26,
+})
+local upgradeLabel = upgradeBtn:FindFirstChild("Label", true) :: TextLabel
+local canUpgrade = false
+
+local latestPlayerState: any = nil
+local function refreshNextBar()
+	local state = latestPlayerState
+	if type(state) ~= "table" then
+		return
+	end
+	local tier = state.PullUpTier or 1
+	tierLabel.Text = (GameConfig.PullUpTiers[tier] or GameConfig.PullUpTiers[1]).Name
+	UiKit.SetTone(tierPill, TIER_TONES[math.min(tier, #TIER_TONES)])
+	local nextTier = GameConfig.PullUpTiers[tier + 1]
+	if not nextTier then
+		nextName.Text = "MAX BAR"
+		nextGain.Text = "Best bar unlocked!"
+		UiKit.SetButtonTone(upgradeBtn, UiKit.Gradients.Grey, 0)
+		upgradeLabel.Text = "MAX BAR"
+		canUpgrade = false
+		return
+	end
+	nextName.Text = nextTier.Name
+	nextGain.Text = `+{nextTier.XPPerRep} XP/rep · {nextTier.SpeedMult}x speed`
+	local affordable = (state.Cash or 0) >= nextTier.Cost
+	canUpgrade = affordable
+	UiKit.SetButtonTone(upgradeBtn, if affordable then UiKit.Gradients.Green else UiKit.Gradients.Grey, if affordable then 0 else 0.4)
+	upgradeLabel.Text = if affordable then `UPGRADE ${GameConfig.FormatNumber(nextTier.Cost)}` else `${GameConfig.FormatNumber(nextTier.Cost)}`
+end
+upgradeBtn.Activated:Connect(function()
+	if canUpgrade then
+		Remotes.GetEvent("RequestPurchase"):FireServer({ ItemId = "pullup_tier", Quantity = 1 })
+	end
+end)
+Remotes.GetEvent("PlayerStateSync").OnClientEvent:Connect(function(state: any)
+	latestPlayerState = state
+	refreshNextBar()
+end)
+
+-- Bottom centre XP bar: Lv badge 70x70, "cur / req XP", "Next: +5 Power", power-gradient fill
 local xpPanel = Instance.new("Frame")
 xpPanel.Name = "XpPanel"
 xpPanel.AnchorPoint = Vector2.new(0.5, 1)
-xpPanel.Position = UDim2.new(0.5, 0, 1, -150)
-xpPanel.Size = UDim2.fromOffset(460, 74)
-xpPanel.BackgroundColor3 = Color3.fromRGB(28, 32, 42)
-xpPanel.BackgroundTransparency = 0.15
+xpPanel.Position = UDim2.new(0.5, 0, 1, -if isPhone then 70 else 40)
+xpPanel.Size = UDim2.fromOffset(if isPhone then 560 else 640, 88)
+xpPanel.BackgroundTransparency = 1
 xpPanel.Parent = hudGui
-UiKit.AddCorner(xpPanel, 14)
-UiKit.AddStroke(xpPanel, Color3.fromRGB(12, 14, 20), 3, Enum.ApplyStrokeMode.Border)
 
-local levelLabel = Instance.new("TextLabel")
-levelLabel.Position = UDim2.fromOffset(14, 6)
-levelLabel.Size = UDim2.fromOffset(150, 28)
-levelLabel.BackgroundTransparency = 1
-levelLabel.Font = Enum.Font.FredokaOne
-levelLabel.TextSize = 26
-levelLabel.TextXAlignment = Enum.TextXAlignment.Left
-levelLabel.TextColor3 = Color3.fromRGB(255, 225, 75)
-levelLabel.Text = "Lv. 1"
-levelLabel.Parent = xpPanel
-UiKit.AddStroke(levelLabel, Color3.fromRGB(15, 18, 25), 2.4)
+local lvBadge = Instance.new("Frame")
+lvBadge.Size = UDim2.fromOffset(70, 70)
+lvBadge.Position = UDim2.fromOffset(0, 9)
+lvBadge.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+lvBadge.ZIndex = 3
+lvBadge.Parent = xpPanel
+UiKit.AddCorner(lvBadge, 20)
+UiKit.ApplyTri(lvBadge, UiKit.Gradients.Luck)
+UiKit.AddFrameOutline(lvBadge, 4)
+local lvKicker = makeLabel(lvBadge, 14, "LV")
+lvKicker.Position = UDim2.fromOffset(0, 6)
+lvKicker.Size = UDim2.new(1, 0, 0, 16)
+lvKicker.ZIndex = 4
+local levelLabel = makeLabel(lvBadge, 34, "1")
+levelLabel.Position = UDim2.fromOffset(0, 20)
+levelLabel.Size = UDim2.new(1, 0, 0, 42)
+levelLabel.ZIndex = 4
 
-local nextRewardLabel = Instance.new("TextLabel")
-nextRewardLabel.AnchorPoint = Vector2.new(1, 0)
-nextRewardLabel.Position = UDim2.new(1, -14, 0, 8)
-nextRewardLabel.Size = UDim2.fromOffset(220, 24)
-nextRewardLabel.BackgroundTransparency = 1
-nextRewardLabel.Font = Enum.Font.FredokaOne
-nextRewardLabel.TextSize = 19
-nextRewardLabel.TextXAlignment = Enum.TextXAlignment.Right
-nextRewardLabel.TextColor3 = Color3.fromRGB(120, 245, 140)
-nextRewardLabel.Text = `Next: +{GameConfig.Training.PowerPerLevel} Power`
-nextRewardLabel.Parent = xpPanel
-UiKit.AddStroke(nextRewardLabel, Color3.fromRGB(15, 18, 25), 2)
+local nextRewardLabel = makeLabel(xpPanel, 20, `Next: +{GameConfig.Training.PowerPerLevel} Power`, Enum.TextXAlignment.Right)
+nextRewardLabel.Position = UDim2.fromOffset(84, 0)
+nextRewardLabel.Size = UDim2.new(1, -84, 0, 26)
+UiKit.ApplyTri(nextRewardLabel, UiKit.Gradients.Power)
 
-local barBack = Instance.new("Frame")
-barBack.Position = UDim2.fromOffset(14, 40)
-barBack.Size = UDim2.new(1, -28, 0, 24)
-barBack.BackgroundColor3 = Color3.fromRGB(14, 16, 22)
-barBack.Parent = xpPanel
-UiKit.AddCorner(barBack, 12)
-
-local barFill = Instance.new("Frame")
-barFill.Size = UDim2.fromScale(0, 1)
-barFill.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-barFill.Parent = barBack
-UiKit.AddCorner(barFill, 12)
-UiKit.AddGlossGradient(barFill, Color3.fromRGB(90, 215, 255))
-
-local xpText = Instance.new("TextLabel")
-xpText.Size = UDim2.fromScale(1, 1)
-xpText.BackgroundTransparency = 1
-xpText.Font = Enum.Font.FredokaOne
-xpText.TextSize = 17
-xpText.TextColor3 = Color3.fromRGB(255, 255, 255)
-xpText.Text = "0 / 10 XP"
-xpText.ZIndex = 3
-xpText.Parent = barBack
-UiKit.AddStroke(xpText, Color3.fromRGB(15, 18, 25), 2)
+local xpBar = UiKit.CreateProgressBar(xpPanel, UDim2.new(1, -62, 0, 34), UiKit.Gradients.Power)
+xpBar.Frame.Position = UDim2.fromOffset(62, 30)
+xpBar.Label.TextSize = 20
+local xpText = xpBar.Label
 
 local function setXpBar(level: number, current: number, required: number, animate: boolean)
-	levelLabel.Text = `Lv. {level}`
+	levelLabel.Text = tostring(level)
 	xpText.Text = `{GameConfig.FormatNumber(current)} / {GameConfig.FormatNumber(required)} XP`
 	local ratio = math.clamp(if required > 0 then current / required else 0, 0, 1)
-	if animate then
-		TweenService:Create(barFill, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-			Size = UDim2.fromScale(ratio, 1),
-		}):Play()
-	else
-		barFill.Size = UDim2.fromScale(ratio, 1)
-	end
+	xpBar.SetFraction(ratio, animate)
 end
 
+-- Gradient pop-up text (rep XP, bonus XP)
 local function popCenterText(text: string, color: Color3, size: number, yScale: number)
-	local label = Instance.new("TextLabel")
+	local label = makeLabel(hudGui, size, text)
 	label.AnchorPoint = Vector2.new(0.5, 0.5)
 	label.Position = UDim2.fromScale(0.5, yScale)
-	label.Size = UDim2.fromOffset(620, 90)
-	label.BackgroundTransparency = 1
-	label.Font = Enum.Font.FredokaOne
-	label.TextSize = size
-	label.TextColor3 = color
-	label.Text = text
+	label.Size = UDim2.fromOffset(700, 90)
 	label.ZIndex = 20
-	label.Parent = hudGui
-	UiKit.AddStroke(label, Color3.fromRGB(25, 18, 5), 4)
+	UiKit.ApplyTri(label, UiKit.TriFromColor(color, 0.5, 0.25))
 
 	local scale = Instance.new("UIScale")
 	scale.Scale = 0.3
@@ -459,14 +580,74 @@ local function popCenterText(text: string, color: Color3, size: number, yScale: 
 	end)
 end
 
+-- LEVEL UP! popup (spec 3f): gold gradient 64, "+N Power" under it, pop in 0.3 s, fade after 1.2 s
 local function celebrateLevelUp(levels: number, powerGained: number)
-	local text = if levels > 1
-		then `LEVEL UP x{levels}! +{powerGained} POWER`
-		else `LEVEL UP! +{powerGained} POWER`
-	popCenterText(text, Color3.fromRGB(255, 215, 60), 58, 0.32)
+	local holder = Instance.new("Frame")
+	holder.AnchorPoint = Vector2.new(0.5, 0.5)
+	holder.Position = UDim2.fromScale(0.5, 0.32)
+	holder.Size = UDim2.fromOffset(700, 130)
+	holder.BackgroundTransparency = 1
+	holder.ZIndex = 20
+	holder.Parent = hudGui
+	local big = makeLabel(holder, 64, if levels > 1 then `LEVEL UP x{levels}!` else "LEVEL UP!")
+	big.Size = UDim2.new(1, 0, 0, 76)
+	big.ZIndex = 21
+	UiKit.ApplyTri(big, UiKit.Gradients.Luck)
+	local sub = makeLabel(holder, 34, `+{powerGained} Power`)
+	sub.Position = UDim2.fromOffset(0, 80)
+	sub.Size = UDim2.new(1, 0, 0, 42)
+	sub.ZIndex = 21
+	UiKit.ApplyTri(sub, UiKit.Gradients.Power)
+
+	local scale = Instance.new("UIScale")
+	scale.Scale = 0.3
+	scale.Parent = holder
+	TweenService:Create(scale, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	task.delay(1.2, function()
+		TweenService:Create(scale, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Scale = 0 }):Play()
+		task.delay(0.35, function()
+			holder:Destroy()
+		end)
+	end)
 	-- Extra-hard camera punch on top of the normal rep shake
 	trauma = 1
 	punch = 1
+end
+
+-- Touch: red STOP circle
+if isPhone then
+	local stopBtn = UiKit.CreateGradientButton({
+		Name = "StopBtn",
+		Parent = hudGui,
+		AnchorPoint = Vector2.new(1, 1),
+		Position = UDim2.new(1, -50, 1, -110),
+		Size = UDim2.fromOffset(120, 120),
+		Kind = "red",
+		CornerRadius = 60,
+		Text = "STOP",
+		TextSize = 30,
+		OnClick = function()
+			requestStopTraining:FireServer()
+		end,
+	})
+	stopBtn.Name = "StopBtn"
+end
+
+-- Session stats (left panel)
+local sessionReps = 0
+local sessionPower = 0
+local sessionXp = 0
+local sessionStart = os.clock()
+local function refreshSession()
+	sessionValues.Reps.Text = GameConfig.FormatNumber(sessionReps)
+	sessionValues.Power.Text = `+{GameConfig.FormatNumber(sessionPower)}`
+	sessionValues.Speed.Text = string.format("%.2fs / rep", currentInterval)
+	sessionValues.Xp.Text = GameConfig.FormatNumber(UiLayout.PerSecond(sessionXp, os.clock() - sessionStart))
+end
+local function resetSession()
+	sessionReps, sessionPower, sessionXp = 0, 0, 0
+	sessionStart = os.clock()
+	refreshSession()
 end
 
 -- Bonus Rep pop-up (offered by the server every few seconds; click within the window for bonus XP)
@@ -481,27 +662,56 @@ end
 
 local function showBonusButton(id: number, window: number, multiplier: number)
 	clearBonusButton()
-	-- Random spot away from the HUD edges and the XP bar
-	local pos = UDim2.fromScale(math.random(28, 72) / 100, math.random(26, 56) / 100)
-	local btn = UiKit.CreateBevelButton({
+	-- Spec: UDim2.new(0.66, 0, 0.55, 0), a little jitter so repeats do not stack
+	local pos = UDim2.fromScale(0.66 + math.random(-6, 6) / 100, 0.55 + math.random(-4, 4) / 100)
+	local btn, face = UiKit.CreateGradientButton({
 		Name = "BonusRepButton",
 		Parent = hudGui,
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = pos,
-		Size = UDim2.fromOffset(250, 64),
-		Color = Color3.fromRGB(255, 185, 35),
-		CornerRadius = 14,
-		Text = `⚡ BONUS REP! ({multiplier}x XP)`,
-		TextSize = 22,
+		Size = UDim2.fromOffset(270, 72),
+		Kind = "orange",
+		Gradient = UiKit.Gradients.Luck,
+		CornerRadius = 18,
+		Text = `BONUS REP! ({multiplier}x XP)`,
+		TextSize = 24,
 	})
 	bonusButton = btn
+	local glow = Instance.new("ImageLabel")
+	glow.Name = "Glow"
+	glow.AnchorPoint = Vector2.new(0.5, 0.5)
+	glow.Position = UDim2.fromScale(0.5, 0.5)
+	glow.Size = UDim2.new(1, 120, 1, 120)
+	glow.BackgroundTransparency = 1
+	glow.Image = UiAssets.Textures.glow
+	glow.ImageColor3 = Color3.fromRGB(255, 225, 74)
+	glow.ImageTransparency = 0.35
+	glow.ZIndex = 0
+	glow.Parent = btn
 
-	-- Bouncy entrance + gentle pulse while it waits
+	-- 150 px timer bar under the button, emptying over the window
+	local timer = Instance.new("Frame")
+	timer.AnchorPoint = Vector2.new(0.5, 0)
+	timer.Position = UDim2.new(0.5, 0, 1, 10)
+	timer.Size = UDim2.fromOffset(150, 10)
+	timer.BackgroundColor3 = Color3.fromRGB(16, 18, 24)
+	timer.Parent = btn
+	UiKit.AddCorner(timer, 5)
+	UiKit.AddStroke(timer, UiKit.Colors.Ink, 2.5, Enum.ApplyStrokeMode.Border)
+	local timerFill = Instance.new("Frame")
+	timerFill.Size = UDim2.fromScale(1, 1)
+	timerFill.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	timerFill.Parent = timer
+	UiKit.AddCorner(timerFill, 5)
+	UiKit.ApplyTri(timerFill, UiKit.Gradients.Luck)
+	TweenService:Create(timerFill, TweenInfo.new(window, Enum.EasingStyle.Linear), { Size = UDim2.fromScale(0, 1) }):Play()
+
+	-- Bouncy entrance, tilted 5 degrees
 	local scale = btn:FindFirstChildOfClass("UIScale") or Instance.new("UIScale")
 	scale.Parent = btn
 	scale.Scale = 0.2
 	TweenService:Create(scale, TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
-	btn.Rotation = math.random(-6, 6)
+	btn.Rotation = 5
 
 	local claimed = false
 	btn.Activated:Connect(function()
@@ -511,10 +721,7 @@ local function showBonusButton(id: number, window: number, multiplier: number)
 		claimed = true
 		requestBonusRep:FireServer({ Id = id })
 		TweenService:Create(scale, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 1.35 }):Play()
-		local face = btn:FindFirstChild("Face")
-		if face then
-			TweenService:Create(face :: Frame, TweenInfo.new(0.15), { BackgroundTransparency = 1 }):Play()
-		end
+		TweenService:Create(face, TweenInfo.new(0.15), { BackgroundTransparency = 1 }):Play()
 		task.delay(0.16, function()
 			if bonusButton == btn then
 				clearBonusButton()
@@ -564,6 +771,7 @@ local function endTrainingLocal()
 	stopFx()
 	clearBonusButton()
 	hudGui.Enabled = false
+	localPlayer:SetAttribute("InTraining", false)
 end
 
 local function requestStop()
@@ -592,7 +800,10 @@ trainingState.OnClientEvent:Connect(function(payload: any)
 		startCamera()
 		startFx()
 		setXpBar(tonumber(payload.StrengthLevel) or 1, tonumber(payload.CurrentXP) or 0, tonumber(payload.RequiredXP) or 10, false)
+		resetSession()
+		refreshNextBar()
 		hudGui.Enabled = true
+		localPlayer:SetAttribute("InTraining", true)
 	else
 		endTrainingLocal()
 	end
@@ -607,6 +818,12 @@ trainingRep.OnClientEvent:Connect(function(payload: any)
 		currentInterval = payload.Interval
 	end
 	local xp = if type(payload.XPGained) == "number" then payload.XPGained else nil
+	if not payload.IsBonus then
+		sessionReps += 1
+	end
+	sessionXp += xp or 0
+	sessionPower += tonumber(payload.PowerGained) or 0
+	refreshSession()
 
 	if payload.IsBonus then
 		-- Bonus Rep: not a rep cycle, so no phase sync / ring; just the burst + a small kick

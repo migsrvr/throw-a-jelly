@@ -106,6 +106,14 @@ function UiLayout.SortedIndexes(items: { SortItem }, mode: string): { number }
 	return out
 end
 
+-- Average per second over a session (training "XP per second"); 0 while the session is under a second old.
+function UiLayout.PerSecond(total: number, elapsed: number): number
+	if elapsed < 1 then
+		return 0
+	end
+	return total / elapsed
+end
+
 -- Number of slots the hotbar always shows, so the bar does not jump.
 UiLayout.HotbarSlots = 5
 

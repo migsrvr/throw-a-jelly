@@ -107,4 +107,11 @@ return function(t: any)
 			expect(newest[3]).toBe(1)
 		end)
 	end)
+
+	describe("UiLayout - session rate", function()
+		it("averages per second and ignores the first second", function()
+			expect(UiLayout.PerSecond(100, 10)).toBe(10)
+			expect(UiLayout.PerSecond(100, 0.5)).toBe(0)
+		end)
+	end)
 end
