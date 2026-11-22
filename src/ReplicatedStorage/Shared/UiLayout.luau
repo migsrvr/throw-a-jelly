@@ -132,6 +132,14 @@ function UiLayout.FormatCountdown(seconds: number): string
 	return string.format("Resets in %02dh %02dm", math.floor(clean / 3600), math.floor((clean % 3600) / 60))
 end
 
+-- Egg odds chance bar width relative to the most common entry (spec 4h).
+function UiLayout.ChanceBarFraction(chance: number, topChance: number): number
+	if topChance <= 0 then
+		return 0
+	end
+	return math.clamp(chance / topChance, 0, 1)
+end
+
 -- Number of slots the hotbar always shows, so the bar does not jump.
 UiLayout.HotbarSlots = 5
 

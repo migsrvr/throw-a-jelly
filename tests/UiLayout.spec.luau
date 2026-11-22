@@ -126,4 +126,12 @@ return function(t: any)
 			expect(UiLayout.FormatCountdown(-5)).toBe("Resets in 00h 00m")
 		end)
 	end)
+
+	describe("UiLayout - odds bar", function()
+		it("is relative to the top chance", function()
+			expect(UiLayout.ChanceBarFraction(40, 40)).toBe(1)
+			expect(UiLayout.ChanceBarFraction(10, 40)).toBe(0.25)
+			expect(UiLayout.ChanceBarFraction(5, 0)).toBe(0)
+		end)
+	end)
 end

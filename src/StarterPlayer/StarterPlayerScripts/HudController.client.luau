@@ -49,19 +49,10 @@ local requestClaimQuest = Remotes.GetEvent("RequestClaimQuest")
 -- ============================================================================
 -- SHOP BINDING (logic lives in GameConfig.ShopCatalog + ProgressionLogic.GetShopListing/Purchase)
 -- UI code only: (1) fires buyShopItem(itemId, quantity) and (2) registers labels with
--- bindShopLabel so refreshShopLabels() can fill in names/prices/states from the listing.
+-- bindShopLabel so refreshShopEntries() can fill in names/prices/states from the listing.
 -- ============================================================================
 local function buyShopItem(itemId: string, quantity: (number | string)?)
 	requestPurchase:FireServer({ ItemId = itemId, Quantity = quantity or 1 })
-end
-
-type ShopLabelBinding = { Label: TextLabel, ItemId: string, OptionIndex: number, Style: "Row" | "RowWide" | "Option" }
-local shopLabelBindings: { ShopLabelBinding } = {}
-
-local function bindShopLabel(label: TextLabel?, itemId: string, optionIndex: number, style: "Row" | "RowWide" | "Option")
-	if label then
-		table.insert(shopLabelBindings, { Label = label, ItemId = itemId, OptionIndex = optionIndex, Style = style })
-	end
 end
 
 -- Structured bindings: the callback receives the whole listing entry plus the synced state
@@ -657,7 +648,7 @@ end
 -- 6. SHOP LABEL REFRESH (used by UpgradesWindow & RobuxStoreWindow)
 -- ============================================================================
 -- Fill every bound shop label from the shared listing (computed locally from synced state)
-local function refreshShopLabels()
+local function refreshShopEntries()
 	local byId: { [string]: ProgressionLogic.ShopListingEntry } = {}
 	for _, entry in ProgressionLogic.GetShopListing(currentState) do
 		byId[entry.Id] = entry
@@ -666,28 +657,6 @@ local function refreshShopLabels()
 		local entry = byId[b.ItemId]
 		if entry then
 			b.Apply(entry, currentState)
-		end
-	end
-	for _, b in shopLabelBindings do
-		local entry = byId[b.ItemId]
-		if entry then
-			local opt = entry.Options[b.OptionIndex]
-			local soldOut = entry.State == "Owned" or entry.State == "Maxed" or entry.State == "Claimed"
-			if b.Style == "RowWide" then
-				-- Wide rows have room for the subtitle (e.g. bait "Luck 1x -> 1.35x")
-				-- Maxed rows say why in the subtitle; owned/claimed rows just show the name + OWNED
-				b.Label.Text = if entry.State == "Maxed"
-					then `{entry.Icon} {entry.Subtitle}`
-					elseif soldOut then `{entry.Icon} {entry.Title} — {entry.PriceText}`
-					else `{entry.Icon} {entry.Title} ({entry.Subtitle}) — {entry.PriceText}`
-			elseif b.Style == "Row" then
-				b.Label.Text = if soldOut
-					then `{entry.Icon} {entry.Title} ({entry.PriceText})`
-					else `{entry.Icon} {entry.Title} — {entry.PriceText}`
-			else
-				b.Label.Text = if soldOut or not opt then entry.PriceText else opt.Label
-			end
-			b.Label.TextTransparency = if opt and not opt.CanAfford then 0.35 else 0
 		end
 	end
 end
@@ -733,7 +702,7 @@ local slimesWin = SlimesWindow.Build(screenGui, {
 local robuxWin = RobuxStoreWindow.Build(screenGui, {
 	ModalScrim = modalScrim,
 	OnToast = showToast,
-	BindShopLabel = bindShopLabel,
+	BindShopEntry = bindShopEntry,
 	BuyShopItem = buyShopItem,
 })
 
@@ -902,7 +871,7 @@ local function refreshAllUi()
 	setCounter(cashCounter, currentState.Cash or 0)
 	setCounter(gemsCounter, currentState.Gems or 0)
 
-	refreshShopLabels()
+	refreshShopEntries()
 	upgradesWin.Refresh(currentState)
 	rewardsBadge.Visible = rewardsWin.Refresh(currentState)
 	robuxWin.Refresh(currentState)
