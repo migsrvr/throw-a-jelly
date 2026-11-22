@@ -23,6 +23,8 @@ local Remotes = require(Shared:WaitForChild("Remotes"))
 local SlimeFactory = require(Shared:WaitForChild("SlimeFactory"))
 
 local PlayerStateService = require(script.Parent:WaitForChild("PlayerStateService"))
+local WorldUi = require(script.Parent:WaitForChild("WorldUi"))
+local LeaderboardService = require(script.Parent:WaitForChild("LeaderboardService"))
 
 local PlotService = {}
 
@@ -67,65 +69,19 @@ local function getPlotOwner(plot: Model): Player?
 end
 
 local function updateCollectBillboard(plot: Model, pendingCash: number)
-	local collectPad = plot:FindFirstChild("CollectPad")
-	local bb = collectPad and collectPad:FindFirstChild("CollectBillboard")
-	if not bb then
-		return
-	end
-	for _, child in bb:GetChildren() do
-		if child:IsA("TextLabel") then
-			if child.Text == "COLLECT" or string.find(child.Text, "COLLECT") then
-				child.Text = "COLLECT"
-			else
-				child.Text = `${GameConfig.FormatNumber(math.floor(pendingCash))}`
-			end
-		end
-	end
+	WorldUi.SetCollect(plot, pendingCash)
 end
 
 local function updateOwnerIncomeBillboard(plot: Model, incomePerSec: number)
-	local ownerSign = plot:FindFirstChild("OwnerSign")
-	local incomeBb = ownerSign and ownerSign:FindFirstChild("IncomeBillboard")
-	local line1 = incomeBb and incomeBb:FindFirstChild("Line1") :: TextLabel?
-	if line1 then
-		line1.Text = `${GameConfig.FormatNumber(incomePerSec)}/s`
-	end
+	WorldUi.SetPlotSign(plot, incomePerSec)
 end
 
 local function updatePullUpBillboard(plot: Model, tierIndex: number)
-	local pullUp = plot:FindFirstChild("PullUpBar")
-	local bar = pullUp and pullUp:FindFirstChild("Bar")
-	local bb = bar and bar:FindFirstChild("Billboard")
-	local tierDef = GameConfig.PullUpTiers[tierIndex] or GameConfig.PullUpTiers[1]
-	if bb then
-		local l1 = bb:FindFirstChild("Line1") :: TextLabel?
-		local l2 = bb:FindFirstChild("Line2") :: TextLabel?
-		local l3 = bb:FindFirstChild("Line3") :: TextLabel?
-		if l1 then
-			l1.Text = tierDef.Name
-		end
-		if l2 then
-			l2.Text = "Walk under the bar to train"
-			l2.TextColor3 = Color3.fromRGB(255, 225, 75)
-		end
-		if l3 then
-			l3.Text = `+{tierDef.XPPerRep} XP / rep`
-			l3.TextColor3 = Color3.fromRGB(110, 255, 130)
-		end
-	end
+	WorldUi.SetPullUp(plot, tierIndex)
 end
 
 local function updateUpgradeSign(plot: Model, maxSlimes: number)
-	local upgradeSign = plot:FindFirstChild("UpgradeSign")
-	local signGui = upgradeSign and upgradeSign:FindFirstChild("SignGui")
-	local txt = signGui and signGui:FindFirstChild("Text") :: TextLabel?
-	if txt then
-		if maxSlimes >= GameConfig.Slots.ExpandedMaxSlimes then
-			txt.Text = "MAX SLOTS\n<font color='#7CFF7C'>12 / 12</font>"
-		else
-			txt.Text = `8 > 12\n<font color='#7CFF7C'>${GameConfig.FormatNumber(GameConfig.Slots.ExpansionCost)}</font>`
-		end
-	end
+	WorldUi.SetUpgradeStand(plot, maxSlimes)
 end
 
 function PlotService.RefreshPlotVisuals(plot: Model, profile: ProgressionLogic.PlayerProfile?)
@@ -161,6 +117,8 @@ function PlotService.RefreshPlotVisuals(plot: Model, profile: ProgressionLogic.P
 				else Color3.fromRGB(240, 255, 150)
 			slotPart.Transparency = if unlocked then 0.12 else 0.58
 
+			WorldUi.SetSlot(slotPart, slotIdx, unlocked, inst)
+
 			local prompt = slotPart:FindFirstChildOfClass("ProximityPrompt")
 			if prompt then
 				prompt.Enabled = unlocked
@@ -176,7 +134,7 @@ function PlotService.RefreshPlotVisuals(plot: Model, profile: ProgressionLogic.P
 			end
 
 			if inst then
-				local slimeModel = SlimeFactory.CreateSlimeModel(inst.SlimeId, true, inst.Mutation, inst.IncomePerSec)
+				local slimeModel = SlimeFactory.CreateSlimeModel(inst.SlimeId, false, inst.Mutation, inst.IncomePerSec)
 				local def = GameConfig.SlimesById[inst.SlimeId] or GameConfig.Slimes[1]
 				local radius = (2.4 * def.Scale) * 0.44
 				local baseCf = CFrame.new(slotPart.Position + Vector3.new(0, slotPart.Size.Y * 0.5 + radius, 0))
@@ -700,35 +658,28 @@ local function updateHubLeaderboards()
 	for player, profile in allProfiles do
 		local rarest = ProgressionLogic.GetRarestSlimeDef(profile)
 		table.insert(entries, {
+			UserId = player.UserId,
 			Name = player.DisplayName,
 			Cash = profile.Cash,
 			Income = ProgressionLogic.GetIncomePerSecond(profile),
 			Power = ProgressionLogic.GetEffectiveThrowPower(profile),
 			RarityRank = rarest.RarityRank,
-			RarityText = `{rarest.Name} ({rarest.Rarity})`,
+			RarityText = rarest.Rarity,
 		})
+	end
+	if not LeaderboardService.ShouldUpdate(#entries) then
+		return
 	end
 
 	local function fillBoard(boardModelName: string, sortFn: (any, any) -> boolean, formatVal: (any) -> string)
-		local mdl = boards:FindFirstChild(boardModelName)
-		local panel = mdl and mdl:FindFirstChild("Panel")
-		local gui = panel and panel:FindFirstChild("Board")
-		if not gui then
-			return
-		end
 		local list = table.clone(entries)
 		table.sort(list, sortFn)
-		for rank = 1, 10 do
-			local row = gui:FindFirstChild(`Row{rank}`) :: TextLabel?
-			if row then
-				local item = list[rank]
-				if item then
-					row.Text = string.format("  %d.  %-14s %s", rank, string.sub(item.Name, 1, 14), formatVal(item))
-				else
-					row.Text = string.format("  %d.   ---", rank)
-				end
-			end
+		local rows: { LeaderboardService.Row } = {}
+		for rank = 1, math.min(10, #list) do
+			local item = list[rank]
+			rows[rank] = { UserId = item.UserId, Name = item.Name, Value = formatVal(item) }
 		end
+		LeaderboardService.Render(boards, boardModelName, rows)
 	end
 
 	fillBoard("MOSTMONEY", function(a, b)
