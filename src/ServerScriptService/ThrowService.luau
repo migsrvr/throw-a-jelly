@@ -67,6 +67,18 @@ function ThrowService.Init()
 		local launchX = 0
 		local char = player.Character
 		local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+		-- Only throws from the throw line count (same box as the client meter, with a little slack)
+		if root then
+			local pos = root.Position
+			local hub = GameConfig.Hub
+			local onLine = pos.X >= hub.ThrowLineMinX - 4
+				and pos.X <= hub.ThrowLineMaxX + 4
+				and pos.Z >= hub.ThrowLineZ - 13
+				and pos.Z <= hub.ThrowLineZ + 7
+			if not onLine then
+				return
+			end
+		end
 		if root then
 			launchX = math.clamp(root.Position.X, -GameConfig.Hub.ClearHalfWidth + 2, GameConfig.Hub.ClearHalfWidth - 2)
 		end

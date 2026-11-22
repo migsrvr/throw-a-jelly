@@ -555,7 +555,8 @@ local function checkNearThrowLine(): boolean
 	local pos = root.Position
 	local nearZ = pos.Z >= (GameConfig.Hub.ThrowLineZ - 9) and pos.Z <= (GameConfig.Hub.ThrowLineZ + 6)
 	local nearY = pos.Y >= (GameConfig.Hub.FloorY - 5)
-	return nearZ and nearY
+	local nearX = pos.X >= GameConfig.Hub.ThrowLineMinX and pos.X <= GameConfig.Hub.ThrowLineMaxX
+	return nearZ and nearY and nearX
 end
 
 -- Bold golden "PERFECT! +20" pop above the throw meter when the slider stops in the top band
