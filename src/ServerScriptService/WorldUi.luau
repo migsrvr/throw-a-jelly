@@ -7,6 +7,7 @@
 	the first time a sign is built. PlotService calls the Set* functions whenever the profile or income changes.
 ]]
 
+local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -19,7 +20,6 @@ local UiKit = require(Shared:WaitForChild("UiKit"))
 local WorldUi = {}
 
 local MAX_DISTANCE = 80
-local SIGN_PIXELS_PER_STUD = 40
 -- Slot signs sit close together, so they only show when you are near the plot
 local SLOT_MAX_DISTANCE = 40
 
@@ -62,22 +62,22 @@ local CARD_TONE: UiKit.Tri = {
 	Dark = Color3.fromRGB(27, 28, 34),
 }
 
--- Fresh BillboardGui with a pixel size; an existing one with this name is reused only when `reuse` is true.
+-- BillboardGui with a pixel size. Returns its centred "Root" frame (all sign content goes inside it) and whether it was
+-- just created. The root carries the UIScale that WorldSignScaler (client) shrinks with camera distance.
 local function getBillboard(
 	parent: Instance,
 	name: string,
 	size: Vector2,
 	offset: Vector3,
 	adornee: BasePart?
-): (BillboardGui, boolean)
+): (Frame, boolean)
 	local existing = parent:FindFirstChild(name)
 	if existing and existing:IsA("BillboardGui") then
-		return existing, false
+		return existing:FindFirstChild("Root") :: Frame, false
 	end
 	local bb = Instance.new("BillboardGui")
 	bb.Name = name
-	-- World-scale (studs) so signs shrink with distance; the design pixels map at SIGN_PIXELS_PER_STUD
-	bb.Size = UDim2.fromScale(size.X / SIGN_PIXELS_PER_STUD, size.Y / SIGN_PIXELS_PER_STUD)
+	bb.Size = UDim2.fromOffset(size.X, size.Y)
 	bb.StudsOffset = offset
 	bb.LightInfluence = 0
 	bb.AlwaysOnTop = false
@@ -86,8 +86,26 @@ local function getBillboard(
 	if adornee then
 		bb.Adornee = adornee
 	end
+	local root = Instance.new("Frame")
+	root.Name = "Root"
+	root.AnchorPoint = Vector2.new(0.5, 0.5)
+	root.Position = UDim2.fromScale(0.5, 0.5)
+	root.Size = UDim2.fromOffset(size.X, size.Y)
+	root.BackgroundTransparency = 1
+	root.Parent = bb
+	local distanceScale = Instance.new("UIScale")
+	distanceScale.Name = "DistanceScale"
+	distanceScale.Parent = root
+	CollectionService:AddTag(bb, "WorldSign")
 	bb.Parent = parent
-	return bb, true
+	return root, true
+end
+
+local function setMaxDistance(root: Frame, distance: number)
+	local gui = root.Parent
+	if gui and gui:IsA("BillboardGui") then
+		gui.MaxDistance = distance
+	end
 end
 
 local function removeOld(parent: Instance?, name: string)
@@ -284,7 +302,7 @@ function WorldUi.SetSlot(slotPart: BasePart, slotIdx: number, unlocked: boolean,
 	end
 	if not unlocked then
 		local bb = getBillboard(slotPart, "SlotSign", Vector2.new(120, 50), Vector3.new(0, 3, 0), slotPart)
-		bb.MaxDistance = SLOT_MAX_DISTANCE
+		setMaxDistance(bb, SLOT_MAX_DISTANCE)
 		local card = makeCard(bb, UiKit.Gradients.Grey, 16)
 		card.Size = UDim2.fromScale(1, 1)
 		local lock = UiKit.CreateIcon(card, "lock", 34)
@@ -297,7 +315,7 @@ function WorldUi.SetSlot(slotPart: BasePart, slotIdx: number, unlocked: boolean,
 	end
 	if not inst then
 		local bb = getBillboard(slotPart, "SlotSign", Vector2.new(140, 44), Vector3.new(0, 3, 0), slotPart)
-		bb.MaxDistance = SLOT_MAX_DISTANCE
+		setMaxDistance(bb, SLOT_MAX_DISTANCE)
 		local card = makeCard(bb, UiKit.Gradients.Luck, 27)
 		card.Size = UDim2.fromScale(1, 1)
 		local lbl = makeLabel(card, 22, "Place Slime")
@@ -307,7 +325,7 @@ function WorldUi.SetSlot(slotPart: BasePart, slotIdx: number, unlocked: boolean,
 	local def = GameConfig.SlimesById[inst.SlimeId] or GameConfig.Slimes[1]
 	local rarityColor = SlimeFactory.GetRarityColor(def.Rarity)
 	local bb = getBillboard(slotPart, "SlotSign", Vector2.new(180, 84), Vector3.new(0, 6, 0), slotPart)
-	bb.MaxDistance = SLOT_MAX_DISTANCE
+	setMaxDistance(bb, SLOT_MAX_DISTANCE)
 	local card = makeCard(bb, UiKit.TriFromColor(rarityColor, 0.4, 0.4), 18)
 	card.Size = UDim2.fromScale(1, 1)
 	local chip = Instance.new("Frame")
