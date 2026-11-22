@@ -19,6 +19,7 @@ local UiKit = require(Shared:WaitForChild("UiKit"))
 local WorldUi = {}
 
 local MAX_DISTANCE = 80
+local SIGN_PIXELS_PER_STUD = 40
 -- Slot signs sit close together, so they only show when you are near the plot
 local SLOT_MAX_DISTANCE = 40
 
@@ -75,7 +76,8 @@ local function getBillboard(
 	end
 	local bb = Instance.new("BillboardGui")
 	bb.Name = name
-	bb.Size = UDim2.fromOffset(size.X, size.Y)
+	-- World-scale (studs) so signs shrink with distance; the design pixels map at SIGN_PIXELS_PER_STUD
+	bb.Size = UDim2.fromScale(size.X / SIGN_PIXELS_PER_STUD, size.Y / SIGN_PIXELS_PER_STUD)
 	bb.StudsOffset = offset
 	bb.LightInfluence = 0
 	bb.AlwaysOnTop = false
