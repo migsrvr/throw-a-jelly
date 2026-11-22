@@ -89,6 +89,7 @@ require("./PullUpMotion.spec")(harness)
 require("./Gems.spec")(harness)
 require("./Quests.spec")(harness)
 require("./ProfileSerializer.spec")(harness)
+require("./UiLayout.spec")(harness)
 
 print("\n----------------------------------------")
 print(`Suites: {totalSuites} | Tests: {totalTests} | Passed: {passedTests} | Failed: {failedTests}`)
