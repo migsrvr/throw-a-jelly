@@ -27,6 +27,7 @@ local Remotes = require(Shared:WaitForChild("Remotes"))
 local SlimeFactory = require(Shared:WaitForChild("SlimeFactory"))
 local ThrowPhysics = require(Shared:WaitForChild("ThrowPhysics"))
 local UiKit = require(Shared:WaitForChild("UiKit"))
+local UiAssets = require(Shared:WaitForChild("UiAssets"))
 
 local requestThrow = Remotes.GetEvent("RequestThrow")
 local throwBroadcast = Remotes.GetEvent("ThrowBroadcast")
@@ -54,6 +55,22 @@ UiKit.AttachResponsiveScale(throwGui)
 local addCorner = UiKit.AddCorner
 local addStroke = UiKit.AddStroke
 
+-- Gradient text helper (spec 1c): label stays white, a 3-stop UIGradient carries the colour.
+local function applyTone(target: GuiObject, tone: UiKit.Tri)
+	local g = target:FindFirstChild("ToneGradient") :: UIGradient?
+	if not g then
+		g = UiKit.ApplyTri(target, tone)
+		return
+	end
+	(g :: UIGradient).Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, tone.Light),
+		ColorSequenceKeypoint.new(0.55, tone.Mid),
+		ColorSequenceKeypoint.new(1, tone.Dark),
+	})
+end
+
+local ZONE_ICON_KEYS = { "zone_meadow", "zone_crystal", "zone_lava", "zone_frost", "zone_candy" }
+
 -- ============================================================================
 -- 1. 9-SEGMENT VERTICAL POWER/LUCK METER ("TAP TO THROW!")
 -- ============================================================================
@@ -74,7 +91,7 @@ pillOuter.Size = UDim2.fromOffset(54, 272)
 pillOuter.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 pillOuter.Parent = meterRoot
 addCorner(pillOuter, 26)
-addStroke(pillOuter, Color3.fromRGB(18, 20, 28), 3.5, Enum.ApplyStrokeMode.Border)
+local pillStroke = addStroke(pillOuter, Color3.fromRGB(18, 20, 28), 3.5, Enum.ApplyStrokeMode.Border)
 
 local segmentsContainer = Instance.new("Frame")
 segmentsContainer.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -113,29 +130,34 @@ local sliderBonusLabel = Instance.new("TextLabel")
 sliderBonusLabel.Name = "BonusLabel"
 sliderBonusLabel.AnchorPoint = Vector2.new(0, 0.5)
 sliderBonusLabel.Position = UDim2.new(1, 10, 0.5, 0)
-sliderBonusLabel.Size = UDim2.fromOffset(80, 36)
+sliderBonusLabel.Size = UDim2.fromOffset(110, 50)
 sliderBonusLabel.BackgroundTransparency = 1
 sliderBonusLabel.Font = Enum.Font.FredokaOne
-sliderBonusLabel.TextSize = 28
+sliderBonusLabel.TextSize = 44
 sliderBonusLabel.TextXAlignment = Enum.TextXAlignment.Left
 sliderBonusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 sliderBonusLabel.Text = "+11"
 sliderBonusLabel.ZIndex = 6
 sliderBonusLabel.Parent = sliderBar
-addStroke(sliderBonusLabel, Color3.fromRGB(15, 18, 25), 2.8)
+UiKit.AddTextStroke(sliderBonusLabel)
+local lastBandIndex = 0
 
 local tapPromptLabel = Instance.new("TextLabel")
 tapPromptLabel.Name = "TapToThrowLabel"
 tapPromptLabel.AnchorPoint = Vector2.new(0.5, 1)
 tapPromptLabel.Position = UDim2.new(0.5, 0, 1, -6)
-tapPromptLabel.Size = UDim2.fromOffset(270, 44)
+tapPromptLabel.Size = UDim2.fromOffset(340, 48)
 tapPromptLabel.BackgroundTransparency = 1
 tapPromptLabel.Font = Enum.Font.FredokaOne
-tapPromptLabel.TextSize = 30
+tapPromptLabel.TextSize = 34
 tapPromptLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-tapPromptLabel.Text = "TAP TO THROW!"
+-- Hint wording per input device (spec section 3)
+tapPromptLabel.Text = if UiKit.IsPhone()
+	then "TAP TO THROW!"
+	elseif UserInputService.GamepadEnabled and not UserInputService.KeyboardEnabled then "PRESS A TO THROW!"
+	else "CLICK TO THROW!"
 tapPromptLabel.Parent = meterRoot
-addStroke(tapPromptLabel, Color3.fromRGB(15, 18, 25), 3.2)
+UiKit.AddTextStroke(tapPromptLabel)
 
 -- Auto-Throw toggle (Gem unlock "auto_throw"): shown at the throw line once owned. While ON, the
 -- controller throws by itself after AutoThrow.IdleDelaySeconds idle, at the fixed AutoThrow meter ratio.
@@ -143,30 +165,73 @@ local ownsAutoThrow = false
 local autoThrowEnabled = false
 local autoIdleClock = 0
 
-local autoThrowLabel: TextLabel? = nil
-local function refreshAutoThrowButton()
-	if autoThrowLabel then
-		autoThrowLabel.Text = if autoThrowEnabled then "🤖 AUTO: ON" else "🤖 AUTO: OFF"
-	end
-end
-local autoThrowButton, _, autoLabel = UiKit.CreateBevelButton({
-	Name = "AutoThrowToggle",
-	Parent = throwGui,
-	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0.48, 182),
-	Size = UDim2.fromOffset(190, 44),
-	Color = Color3.fromRGB(80, 210, 230),
-	CornerRadius = 11,
-	Text = "🤖 AUTO: OFF",
-	TextSize = 20,
-	OnClick = function()
-		autoThrowEnabled = not autoThrowEnabled
-		autoIdleClock = 0
-		refreshAutoThrowButton()
-	end,
-})
-autoThrowLabel = autoLabel
+-- AUTO toggle (spec section 3): dark gradient pill, "AUTO" + 58x32 track (green when on) with a sliding knob.
+local autoThrowButton = Instance.new("TextButton")
+autoThrowButton.Name = "AutoThrowToggle"
+autoThrowButton.AnchorPoint = Vector2.new(0.5, 0)
+autoThrowButton.Position = UDim2.new(0.5, 0, 0.48, 182)
+autoThrowButton.Size = UDim2.fromOffset(190, 48)
+autoThrowButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+autoThrowButton.AutoButtonColor = false
+autoThrowButton.Text = ""
 autoThrowButton.Visible = false
+autoThrowButton.Parent = throwGui
+addCorner(autoThrowButton, 24)
+UiKit.AddGradient(autoThrowButton, Color3.fromRGB(52, 54, 63), Color3.fromRGB(36, 38, 44), Color3.fromRGB(23, 24, 28))
+UiKit.AddFrameOutline(autoThrowButton, 3)
+
+local autoText = Instance.new("TextLabel")
+autoText.AnchorPoint = Vector2.new(0, 0.5)
+autoText.Position = UDim2.new(0, 18, 0.5, 0)
+autoText.Size = UDim2.fromOffset(70, 30)
+autoText.BackgroundTransparency = 1
+autoText.Font = Enum.Font.FredokaOne
+autoText.TextSize = 22
+autoText.TextXAlignment = Enum.TextXAlignment.Left
+autoText.TextColor3 = Color3.fromRGB(255, 255, 255)
+autoText.Text = "AUTO"
+autoText.Parent = autoThrowButton
+UiKit.AddTextStroke(autoText)
+
+local autoTrack = Instance.new("Frame")
+autoTrack.AnchorPoint = Vector2.new(1, 0.5)
+autoTrack.Position = UDim2.new(1, -12, 0.5, 0)
+autoTrack.Size = UDim2.fromOffset(58, 32)
+autoTrack.BackgroundColor3 = Color3.fromRGB(90, 92, 100)
+autoTrack.Parent = autoThrowButton
+addCorner(autoTrack, 16)
+UiKit.AddFrameOutline(autoTrack, 2.5)
+
+local autoKnob = Instance.new("Frame")
+autoKnob.AnchorPoint = Vector2.new(0, 0.5)
+autoKnob.Position = UDim2.new(0, 5, 0.5, 0)
+autoKnob.Size = UDim2.fromOffset(22, 22)
+autoKnob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+autoKnob.Parent = autoTrack
+addCorner(autoKnob, 11)
+UiKit.AddGradient(autoKnob, Color3.fromRGB(255, 255, 255), Color3.fromRGB(235, 238, 244), Color3.fromRGB(215, 219, 228))
+
+local autoTrackGradient: UIGradient? = nil
+local function refreshAutoThrowButton()
+	local on = autoThrowEnabled
+	if on and not autoTrackGradient then
+		autoTrackGradient = UiKit.ApplyTri(autoTrack, UiKit.Gradients.Green)
+	end
+	if autoTrackGradient then
+		autoTrackGradient.Enabled = on
+	end
+	autoTrack.BackgroundColor3 = if on then Color3.fromRGB(255, 255, 255) else Color3.fromRGB(90, 92, 100)
+	TweenService:Create(
+		autoKnob,
+		TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ Position = if on then UDim2.new(1, -27, 0.5, 0) else UDim2.new(0, 5, 0.5, 0) }
+	):Play()
+end
+autoThrowButton.Activated:Connect(function()
+	autoThrowEnabled = not autoThrowEnabled
+	autoIdleClock = 0
+	refreshAutoThrowButton()
+end)
 
 Remotes.GetEvent("PlayerStateSync").OnClientEvent:Connect(function(state: any)
 	if type(state) == "table" and type(state.OwnedBoosts) == "table" then
@@ -184,8 +249,8 @@ end)
 local flightHud = Instance.new("Frame")
 flightHud.Name = "FlightHud"
 flightHud.AnchorPoint = Vector2.new(0.5, 0)
-flightHud.Position = UDim2.new(0.5, 0, 0, 18)
-flightHud.Size = UDim2.fromOffset(360, 110)
+flightHud.Position = UDim2.new(0.5, 0, 0, 40)
+flightHud.Size = UDim2.fromOffset(460, 250)
 flightHud.BackgroundTransparency = 1
 flightHud.Visible = false
 flightHud.Parent = throwGui
@@ -193,47 +258,73 @@ flightHud.Parent = throwGui
 local luckValueLabel = Instance.new("TextLabel")
 luckValueLabel.AnchorPoint = Vector2.new(0.5, 0)
 luckValueLabel.Position = UDim2.fromScale(0.5, 0)
-luckValueLabel.Size = UDim2.fromOffset(220, 38)
+luckValueLabel.Size = UDim2.fromOffset(420, 92)
 luckValueLabel.BackgroundTransparency = 1
 luckValueLabel.Font = Enum.Font.FredokaOne
-luckValueLabel.TextSize = 34
+luckValueLabel.TextSize = 88
 luckValueLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 luckValueLabel.Text = "1.15X"
 luckValueLabel.Parent = flightHud
-addStroke(luckValueLabel, Color3.fromRGB(15, 18, 25), 3)
+UiKit.ApplyTri(luckValueLabel, UiKit.Gradients.Luck)
+UiKit.AddTextStroke(luckValueLabel)
 
 local luckSubLabel = Instance.new("TextLabel")
 luckSubLabel.AnchorPoint = Vector2.new(0.5, 0)
-luckSubLabel.Position = UDim2.new(0.5, 0, 0, 32)
-luckSubLabel.Size = UDim2.fromOffset(140, 22)
+luckSubLabel.Position = UDim2.new(0.5, 0, 0, 90)
+luckSubLabel.Size = UDim2.fromOffset(200, 38)
 luckSubLabel.BackgroundTransparency = 1
 luckSubLabel.Font = Enum.Font.FredokaOne
-luckSubLabel.TextSize = 18
+luckSubLabel.TextSize = 32
 luckSubLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 luckSubLabel.Text = "LUCK"
 luckSubLabel.Parent = flightHud
-addStroke(luckSubLabel, Color3.fromRGB(15, 18, 25), 2.2)
+UiKit.AddTextStroke(luckSubLabel)
 
 local zoneBanner = Instance.new("Frame")
+zoneBanner.Name = "ZoneBanner"
 zoneBanner.AnchorPoint = Vector2.new(0.5, 0)
-zoneBanner.Position = UDim2.new(0.5, 0, 0, 62)
-zoneBanner.Size = UDim2.fromOffset(310, 42)
-zoneBanner.BackgroundColor3 = Color3.fromRGB(18, 22, 28)
-zoneBanner.BackgroundTransparency = 0.38
+zoneBanner.Position = UDim2.new(0.5, 0, 0, 132)
+zoneBanner.Size = UDim2.fromOffset(340, 60)
+zoneBanner.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 zoneBanner.BorderSizePixel = 0
 zoneBanner.Parent = flightHud
-addCorner(zoneBanner, 10)
-addStroke(zoneBanner, Color3.fromRGB(15, 18, 25), 2, Enum.ApplyStrokeMode.Border)
+addCorner(zoneBanner, 30)
+UiKit.ApplyTri(zoneBanner, UiKit.TriFromColor(Color3.fromRGB(120, 245, 105)))
+UiKit.AddFrameOutline(zoneBanner, 4)
+UiKit.AddStripes(zoneBanner, 30)
+local zoneBannerScale = Instance.new("UIScale")
+zoneBannerScale.Parent = zoneBanner
+
+local zoneBannerIcon = UiKit.CreateIcon(zoneBanner, "zone_meadow", 42)
+zoneBannerIcon.AnchorPoint = Vector2.new(0, 0.5)
+zoneBannerIcon.Position = UDim2.new(0, 14, 0.5, 0)
 
 local zoneBannerText = Instance.new("TextLabel")
-zoneBannerText.Size = UDim2.fromScale(1, 1)
+zoneBannerText.Size = UDim2.new(1, -70, 1, 0)
+zoneBannerText.Position = UDim2.fromOffset(64, 0)
 zoneBannerText.BackgroundTransparency = 1
 zoneBannerText.Font = Enum.Font.FredokaOne
-zoneBannerText.TextSize = 28
-zoneBannerText.TextColor3 = Color3.fromRGB(120, 245, 105)
-zoneBannerText.Text = "Meadow 🌿"
+zoneBannerText.TextSize = 30
+zoneBannerText.TextColor3 = Color3.fromRGB(255, 255, 255)
+zoneBannerText.TextXAlignment = Enum.TextXAlignment.Left
+zoneBannerText.Text = "MEADOW"
 zoneBannerText.Parent = zoneBanner
-addStroke(zoneBannerText, Color3.fromRGB(15, 20, 15), 2.5)
+UiKit.AddTextStroke(zoneBannerText)
+
+local distanceLabel = Instance.new("TextLabel")
+distanceLabel.Name = "DistanceLabel"
+distanceLabel.AnchorPoint = Vector2.new(0.5, 0)
+distanceLabel.Position = UDim2.new(0.5, 0, 0, 200)
+distanceLabel.Size = UDim2.fromOffset(240, 32)
+distanceLabel.BackgroundTransparency = 1
+distanceLabel.Font = Enum.Font.FredokaOne
+distanceLabel.TextSize = 22
+distanceLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+distanceLabel.Text = "0 studs"
+distanceLabel.Parent = flightHud
+UiKit.AddTextStroke(distanceLabel)
+
+local currentZoneIndex = 0
 
 -- ============================================================================
 -- 3. CINEMATIC "1 IN X" REVEAL CUTSCENE OVERLAY (NO HANGMAN LETTERS)
@@ -250,50 +341,49 @@ fadeOverlay.Parent = throwGui
 local revealRoot = Instance.new("Frame")
 revealRoot.Name = "RevealCutsceneRoot"
 revealRoot.Size = UDim2.fromScale(1, 1)
-revealRoot.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-revealRoot.BackgroundTransparency = 0.65
+revealRoot.BackgroundColor3 = Color3.fromRGB(6, 4, 14)
+revealRoot.BackgroundTransparency = 0.5
 revealRoot.Visible = false
 revealRoot.ZIndex = 12
 revealRoot.Parent = throwGui
 
 local superLuckyLabel = Instance.new("TextLabel")
 superLuckyLabel.AnchorPoint = Vector2.new(0.5, 0)
-superLuckyLabel.Position = UDim2.new(0.5, 0, 0, 18)
-superLuckyLabel.Size = UDim2.fromOffset(360, 44)
+superLuckyLabel.Position = UDim2.new(0.5, 0, 0, 100)
+superLuckyLabel.Size = UDim2.fromOffset(560, 56)
 superLuckyLabel.BackgroundTransparency = 1
 superLuckyLabel.Font = Enum.Font.FredokaOne
-superLuckyLabel.TextSize = 36
-superLuckyLabel.TextColor3 = Color3.fromRGB(255, 85, 110)
-superLuckyLabel.Rotation = -4
+superLuckyLabel.TextSize = 42
+superLuckyLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+superLuckyLabel.Rotation = -3
 superLuckyLabel.Text = "SUPER LUCKY!"
 superLuckyLabel.Visible = false
 superLuckyLabel.Parent = revealRoot
-addStroke(superLuckyLabel, Color3.fromRGB(20, 10, 15), 3)
+UiKit.ApplyTri(superLuckyLabel, UiKit.Gradients.Luck)
+UiKit.AddTextStroke(superLuckyLabel)
 
+-- "1 in N" odds (no pill: spec 5 puts it as 76 px outlined text)
 local oddsPill = Instance.new("Frame")
 oddsPill.AnchorPoint = Vector2.new(0.5, 0)
-oddsPill.Position = UDim2.new(0.5, 0, 0, 62)
-oddsPill.Size = UDim2.fromOffset(186, 56)
-oddsPill.BackgroundColor3 = Color3.fromRGB(45, 35, 20)
-oddsPill.BackgroundTransparency = 0.22
+oddsPill.Position = UDim2.new(0.5, 0, 0, 18)
+oddsPill.Size = UDim2.fromOffset(520, 80)
+oddsPill.BackgroundTransparency = 1
 oddsPill.Parent = revealRoot
-addCorner(oddsPill, 28)
-addStroke(oddsPill, Color3.fromRGB(95, 75, 40), 2, Enum.ApplyStrokeMode.Border)
 
 local oddsLabel = Instance.new("TextLabel")
 oddsLabel.Size = UDim2.fromScale(1, 1)
 oddsLabel.BackgroundTransparency = 1
 oddsLabel.Font = Enum.Font.FredokaOne
-oddsLabel.TextSize = 36
+oddsLabel.TextSize = 76
 oddsLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 oddsLabel.Text = "1 in 1"
 oddsLabel.Parent = oddsPill
-addStroke(oddsLabel, Color3.fromRGB(15, 15, 20), 3)
+UiKit.AddTextStroke(oddsLabel)
 
 local finalInfoFrame = Instance.new("Frame")
 finalInfoFrame.AnchorPoint = Vector2.new(0.5, 1)
 finalInfoFrame.Position = UDim2.new(0.5, 0, 1, -24)
-finalInfoFrame.Size = UDim2.fromOffset(480, 185)
+finalInfoFrame.Size = UDim2.fromOffset(900, 270)
 finalInfoFrame.BackgroundTransparency = 1
 finalInfoFrame.Visible = false
 finalInfoFrame.Parent = revealRoot
@@ -301,69 +391,103 @@ finalInfoFrame.Parent = revealRoot
 local mutationLabel = Instance.new("TextLabel")
 mutationLabel.AnchorPoint = Vector2.new(0.5, 0)
 mutationLabel.Position = UDim2.new(0.5, 0, 0, 0)
-mutationLabel.Size = UDim2.fromOffset(300, 30)
+mutationLabel.Size = UDim2.fromOffset(600, 40)
 mutationLabel.BackgroundTransparency = 1
 mutationLabel.Font = Enum.Font.FredokaOne
-mutationLabel.TextSize = 24
-mutationLabel.TextColor3 = Color3.fromRGB(100, 255, 140)
+mutationLabel.TextSize = 34
+mutationLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 mutationLabel.Text = "EMERALD"
 mutationLabel.Parent = finalInfoFrame
-addStroke(mutationLabel, Color3.fromRGB(15, 20, 15), 2.5)
+UiKit.AddTextStroke(mutationLabel)
 
+-- SUGARKING (9 letters) at 84 px has to fit 1241 px: the label is wide and TextScaled-capped
 local revealedNameLabel = Instance.new("TextLabel")
 revealedNameLabel.AnchorPoint = Vector2.new(0.5, 0)
-revealedNameLabel.Position = UDim2.new(0.5, 0, 0, 28)
-revealedNameLabel.Size = UDim2.fromOffset(440, 58)
+revealedNameLabel.Position = UDim2.new(0.5, 0, 0, 40)
+revealedNameLabel.Size = UDim2.fromOffset(900, 92)
 revealedNameLabel.BackgroundTransparency = 1
 revealedNameLabel.Font = Enum.Font.FredokaOne
-revealedNameLabel.TextSize = 52
-revealedNameLabel.TextColor3 = Color3.fromRGB(115, 255, 130)
+revealedNameLabel.TextSize = 84
+revealedNameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 revealedNameLabel.Text = "HONEY"
 revealedNameLabel.Parent = finalInfoFrame
-addStroke(revealedNameLabel, Color3.fromRGB(15, 20, 15), 3.5)
+UiKit.AddTextStroke(revealedNameLabel)
 
 local revealedIncomeLabel = Instance.new("TextLabel")
 revealedIncomeLabel.AnchorPoint = Vector2.new(0.5, 0)
-revealedIncomeLabel.Position = UDim2.new(0.5, 0, 0, 88)
-revealedIncomeLabel.Size = UDim2.fromOffset(240, 38)
+revealedIncomeLabel.Position = UDim2.new(0.5, 0, 0, 136)
+revealedIncomeLabel.Size = UDim2.fromOffset(400, 46)
 revealedIncomeLabel.BackgroundTransparency = 1
 revealedIncomeLabel.Font = Enum.Font.FredokaOne
-revealedIncomeLabel.TextSize = 32
+revealedIncomeLabel.TextSize = 38
 revealedIncomeLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 revealedIncomeLabel.Text = "$10/s"
 revealedIncomeLabel.Parent = finalInfoFrame
-addStroke(revealedIncomeLabel, Color3.fromRGB(15, 18, 25), 2.8)
+UiKit.ApplyTri(revealedIncomeLabel, UiKit.Gradients.Cash)
+UiKit.AddTextStroke(revealedIncomeLabel)
+
+-- "+N" followed by the gem icon (38 px)
+local gemsRow = Instance.new("Frame")
+gemsRow.Name = "GemsRow"
+gemsRow.AnchorPoint = Vector2.new(0.5, 0)
+gemsRow.Position = UDim2.new(0.5, 0, 0, 186)
+gemsRow.Size = UDim2.fromOffset(200, 40)
+gemsRow.BackgroundTransparency = 1
+gemsRow.Visible = false
+gemsRow.Parent = finalInfoFrame
+local gemsLayout = Instance.new("UIListLayout")
+gemsLayout.FillDirection = Enum.FillDirection.Horizontal
+gemsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+gemsLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+gemsLayout.Padding = UDim.new(0, 6)
+gemsLayout.Parent = gemsRow
+
+local gemsLabel = Instance.new("TextLabel")
+gemsLabel.AutomaticSize = Enum.AutomaticSize.X
+gemsLabel.Size = UDim2.fromOffset(0, 40)
+gemsLabel.BackgroundTransparency = 1
+gemsLabel.Font = Enum.Font.FredokaOne
+gemsLabel.TextSize = 32
+gemsLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+gemsLabel.Text = "+3"
+gemsLabel.LayoutOrder = 1
+gemsLabel.Parent = gemsRow
+UiKit.ApplyTri(gemsLabel, UiKit.Gradients.Gems)
+UiKit.AddTextStroke(gemsLabel)
+local gemsIcon = UiKit.CreateIcon(gemsRow, "gem", 38)
+gemsIcon.LayoutOrder = 2
 
 local newBadge = Instance.new("Frame")
 newBadge.AnchorPoint = Vector2.new(0, 0.5)
-newBadge.Position = UDim2.new(0.5, 125, 0, 68)
-newBadge.Size = UDim2.fromOffset(96, 44)
-newBadge.BackgroundColor3 = Color3.fromRGB(255, 205, 55)
-newBadge.Rotation = -12
+newBadge.Position = UDim2.new(0.5, 250, 0, 80)
+newBadge.Size = UDim2.fromOffset(110, 50)
+newBadge.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+newBadge.Rotation = 10
 newBadge.Parent = finalInfoFrame
-addCorner(newBadge, 10)
-addStroke(newBadge, Color3.fromRGB(25, 20, 10), 3, Enum.ApplyStrokeMode.Border)
+addCorner(newBadge, 12)
+UiKit.ApplyTri(newBadge, UiKit.Gradients.Red)
+UiKit.AddFrameOutline(newBadge, 3)
 
 local newBadgeText = Instance.new("TextLabel")
 newBadgeText.Size = UDim2.fromScale(1, 1)
 newBadgeText.BackgroundTransparency = 1
 newBadgeText.Font = Enum.Font.FredokaOne
-newBadgeText.TextSize = 26
+newBadgeText.TextSize = 28
 newBadgeText.TextColor3 = Color3.fromRGB(255, 255, 255)
 newBadgeText.Text = "NEW!"
 newBadgeText.Parent = newBadge
-addStroke(newBadgeText, Color3.fromRGB(25, 20, 10), 2.5)
+UiKit.AddTextStroke(newBadgeText)
 
 local tapContinueLabel = Instance.new("TextLabel")
 tapContinueLabel.AnchorPoint = Vector2.new(0.5, 1)
 tapContinueLabel.Position = UDim2.new(0.5, 0, 1, 0)
-tapContinueLabel.Size = UDim2.fromOffset(260, 26)
+tapContinueLabel.Size = UDim2.fromOffset(260, 28)
 tapContinueLabel.BackgroundTransparency = 1
 tapContinueLabel.Font = Enum.Font.FredokaOne
-tapContinueLabel.TextSize = 18
-tapContinueLabel.TextColor3 = Color3.fromRGB(220, 225, 235)
-tapContinueLabel.TextTransparency = 0.25
-tapContinueLabel.Text = "tap to continue"
+tapContinueLabel.TextSize = 22
+tapContinueLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+tapContinueLabel.TextTransparency = 0.15
+tapContinueLabel.Text = if UiKit.IsPhone() then "tap to continue" else "click to continue"
 tapContinueLabel.Parent = finalInfoFrame
 
 local function playShockwaveRings()
@@ -444,19 +568,22 @@ local function showPerfectCallout(bonusPower: number)
 	label.BackgroundTransparency = 1
 	label.Font = Enum.Font.FredokaOne
 	label.TextSize = 64
-	label.TextColor3 = Color3.fromRGB(255, 215, 60)
+	label.TextColor3 = Color3.fromRGB(255, 255, 255)
 	label.Text = `PERFECT! +{bonusPower}`
 	label.Rotation = -6
 	label.ZIndex = 15
 	label.Parent = throwGui
-	addStroke(label, Color3.fromRGB(60, 35, 5), 4)
+	UiKit.ApplyTri(label, UiKit.Gradients.Luck)
+	UiKit.AddTextStroke(label)
 
+	-- PERFECT moment (spec section 3): pop 1.4 -> 1 with Back easing, flash the pill outline gold
 	local scale = Instance.new("UIScale")
-	scale.Scale = 0.3
+	scale.Scale = 1.4
 	scale.Parent = label
-	TweenService:Create(scale, TweenInfo.new(0.22, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1.15 }):Play()
-	task.delay(0.22, function()
-		TweenService:Create(scale, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	TweenService:Create(scale, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	pillStroke.Color = UiKit.Colors.Gold
+	task.delay(0.5, function()
+		pillStroke.Color = Color3.fromRGB(18, 20, 28)
 	end)
 	task.delay(0.9, function()
 		local fade = TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
@@ -477,6 +604,7 @@ local function triggerThrowFromMeter(isAuto: boolean?)
 	end
 	lastThrowTime = now
 	isThrowInFlight = true
+	localPlayer:SetAttribute("InThrow", true)
 	meterRoot.Visible = false
 	autoThrowButton.Visible = false
 
@@ -516,6 +644,7 @@ local function triggerThrowFromMeter(isAuto: boolean?)
 		-- Pitch was cut short (e.g. character reset) before release: unlock the throw line again
 		if not releaseSent then
 			isThrowInFlight = false
+			localPlayer:SetAttribute("InThrow", false)
 			if cam then
 				cam.CameraType = Enum.CameraType.Custom
 			end
@@ -819,12 +948,13 @@ local function runRevealCutscene(finalPos: Vector3, baitModel: Model, payload: a
 		else SlimeFactory.GetRarityColor(def.Rarity)
 
 	mutationLabel.Text = if mutId ~= "NORMAL" then mutId else string.upper(def.Rarity)
-	mutationLabel.TextColor3 = mutColor
+	applyTone(mutationLabel, UiKit.TriFromColor(mutColor, 0.6, 0.3))
 	revealedNameLabel.Text = shortWord
-	revealedNameLabel.TextColor3 = SlimeFactory.ToColor3(def.Color)
+	applyTone(revealedNameLabel, UiKit.TriFromColor(SlimeFactory.ToColor3(def.Color), 0.6, 0.3))
 	local gemsEarned = tonumber(payload.GemsEarned) or 0
 	revealedIncomeLabel.Text = `${GameConfig.FormatNumber(payload.CaughtIncomePerSec or def.IncomePerSec)}/s`
-		.. if gemsEarned > 0 then `   +{gemsEarned} 💎` else ""
+	gemsLabel.Text = `+{gemsEarned}`
+	gemsRow.Visible = gemsEarned > 0
 	newBadge.Visible = (payload.IsNewDiscovery == true)
 	finalInfoFrame.Visible = true
 
@@ -853,6 +983,7 @@ local function runRevealCutscene(finalPos: Vector3, baitModel: Model, payload: a
 	TweenService:Create(fadeOverlay, TweenInfo.new(0.25), { BackgroundTransparency = 1 }):Play()
 	inRevealCutscene = false
 	isThrowInFlight = false
+	localPlayer:SetAttribute("InThrow", false)
 	localPlayer:SetAttribute("InRevealCutscene", false)
 end
 
@@ -896,6 +1027,8 @@ throwBroadcast.OnClientEvent:Connect(function(payload: any)
 	local maxDistance = 0
 	if isLocal then
 		luckValueLabel.Text = string.format("%.2fX", GameConfig.ComputeFlightLuck(0, meterLuck, baitLuck))
+		currentZoneIndex = 0
+		distanceLabel.Text = "0 studs"
 		flightHud.Visible = true
 	end
 
@@ -928,8 +1061,19 @@ throwBroadcast.OnClientEvent:Connect(function(payload: any)
 
 			if isLocal and cam then
 				local zoneDef = ThrowPhysics.GetZoneAtZ(math.max(0, pos.Z))
-				zoneBannerText.Text = `{zoneDef.Name} {zoneDef.Emoji}`
-				zoneBannerText.TextColor3 = SlimeFactory.ToColor3(zoneDef.ThemeColor)
+				distanceLabel.Text = `{math.floor(maxDistance)} studs`
+				if zoneDef.Index ~= currentZoneIndex then
+					currentZoneIndex = zoneDef.Index
+					zoneBannerText.Text = string.upper(zoneDef.Name)
+					applyTone(zoneBanner, UiKit.TriFromColor(SlimeFactory.ToColor3(zoneDef.ThemeColor)))
+					zoneBannerIcon.Image = (UiAssets.Icons :: any)[ZONE_ICON_KEYS[zoneDef.Index] or ""] or ""
+					zoneBannerScale.Scale = 1.15
+					TweenService:Create(
+						zoneBannerScale,
+						TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+						{ Scale = 1 }
+					):Play()
+				end
 
 				-- Hold the 3/4 pitcher shot until the follow-through finishes, then blend to chase the bait
 				if not isPitchAnimating then
@@ -985,7 +1129,10 @@ RunService.RenderStepped:Connect(function(dt: number)
 		local yScale = 0.94 - currentMeterRatio * 0.88
 		sliderBar.Position = UDim2.fromScale(0.5, yScale)
 		sliderBonusLabel.Text = `+{segDef.BonusPower}`
-		sliderBonusLabel.TextColor3 = SlimeFactory.ToColor3(segDef.Color)
+		if segDef.Index ~= lastBandIndex then
+			lastBandIndex = segDef.Index
+			applyTone(sliderBonusLabel, UiKit.TriFromColor(SlimeFactory.ToColor3(segDef.Color)))
+		end
 
 		autoThrowButton.Visible = ownsAutoThrow
 		if ownsAutoThrow and autoThrowEnabled then

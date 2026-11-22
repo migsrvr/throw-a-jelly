@@ -1341,6 +1341,11 @@ RunService.RenderStepped:Connect(function()
 		return
 	end
 
+	-- Spec 4: Objective and Hotbar hide while the bait is in flight (ThrowController sets the attribute)
+	local inThrow = (localPlayer:GetAttribute("InThrow") :: boolean?) == true
+	objectiveGroup.Visible = not inThrow
+	hotbarGroup.Visible = not inThrow
+
 	local obj = ProgressionLogic.GetCurrentObjective(currentState, selectedHotbarUid ~= nil)
 	objectiveLabel.Text = obj.Text
 
