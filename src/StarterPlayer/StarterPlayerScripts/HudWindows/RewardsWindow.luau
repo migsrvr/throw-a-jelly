@@ -1,10 +1,11 @@
 --!strict
 --[[
 	RewardsWindow.luau
-	Two-tab Rewards & Quests modal:
-	- Tab 1 (Daily): 7-Day Daily Reward Calendar strip on top (ticked claimed days, glowing today with CLAIM,
-	  dimmed future days, "Resets in HH:MM" countdown) + 3 Daily Quest cards with progress bars below.
-	- Tab 2 (Quest Line): Current step card large with progress bar + CLAIM, plus the next 2 steps dimmed below.
+	Rewards & Quests modal (docs/docs/UI-MOCKUP-SPEC.md 3c, 4d). Built only from UiKit.
+	- Daily tab: "Daily Login · Day N" + reset countdown, 7 day tiles (claimed / today / future / Day 7 epic),
+	  3 daily quest cards with progress bars and CLAIM.
+	- Quest Line tab: 12-segment track, hero card for the current step (glows when claimable),
+	  "COMING UP" preview cards with lock plates, and an "All quests done!" card after step 12.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -12,7 +13,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared:WaitForChild("GameConfig"))
 local QuestLogic = require(Shared:WaitForChild("QuestLogic"))
+local UiAssets = require(Shared:WaitForChild("UiAssets"))
 local UiKit = require(Shared:WaitForChild("UiKit"))
+local UiLayout = require(Shared:WaitForChild("UiLayout"))
 
 local RewardsWindow = {}
 
@@ -27,599 +30,543 @@ export type RewardsWindowHandle = {
 	Refresh: (state: any) -> boolean,
 }
 
-local function formatRewardText(reward: GameConfig.QuestReward): string
-	local parts = {}
-	if reward.Gems and reward.Gems > 0 then
-		table.insert(parts, `💎 +{GameConfig.FormatNumber(reward.Gems)}`)
-	end
-	if reward.Cash and reward.Cash > 0 then
-		table.insert(parts, `💵 +${GameConfig.FormatNumber(reward.Cash)}`)
-	end
-	return table.concat(parts, "  ")
+local CARD_TONE: UiKit.Tri = {
+	Light = Color3.fromRGB(44, 46, 55),
+	Mid = Color3.fromRGB(36, 37, 45),
+	Dark = Color3.fromRGB(27, 28, 34),
+}
+local DARK_TONE: UiKit.Tri = {
+	Light = Color3.fromRGB(58, 61, 76),
+	Mid = Color3.fromRGB(48, 50, 65),
+	Dark = Color3.fromRGB(38, 40, 54),
+}
+
+local function makeLabel(parent: Instance, size: number, text: string, align: Enum.TextXAlignment?): TextLabel
+	local l = Instance.new("TextLabel")
+	l.BackgroundTransparency = 1
+	l.Font = Enum.Font.FredokaOne
+	l.TextSize = size
+	l.TextColor3 = Color3.fromRGB(255, 255, 255)
+	l.Text = text
+	l.TextXAlignment = align or Enum.TextXAlignment.Center
+	l.Parent = parent
+	UiKit.AddTextStroke(l)
+	return l
 end
 
-local function formatCountdown(seconds: number): string
-	local clean = math.max(0, math.floor(seconds))
-	local hrs = math.floor(clean / 3600)
-	local mins = math.floor((clean % 3600) / 60)
-	return string.format("Resets in %02dh %02dm", hrs, mins)
+local function makeCard(parent: Instance, radius: number, tone: UiKit.Tri?): Frame
+	local f = Instance.new("Frame")
+	f.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	f.Parent = parent
+	UiKit.AddCorner(f, radius)
+	UiKit.ApplyTri(f, tone or CARD_TONE)
+	UiKit.AddFrameOutline(f, 4)
+	return f
+end
+
+-- Reward chips ("+15" + gem icon, "+$250" + cash icon), right aligned. Rebuilt only when the reward changes.
+local function makeRewardChips(parent: Instance, textSize: number): (Frame, (reward: GameConfig.QuestReward) -> ())
+	local holder = Instance.new("Frame")
+	holder.BackgroundTransparency = 1
+	holder.Parent = parent
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+	layout.VerticalAlignment = Enum.VerticalAlignment.Center
+	layout.Padding = UDim.new(0, 10)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = holder
+	local lastKey = ""
+	local function set(reward: GameConfig.QuestReward)
+		local key = `{reward.Gems or 0}|{reward.Cash or 0}`
+		if key == lastKey then
+			return
+		end
+		lastKey = key
+		for _, c in holder:GetChildren() do
+			if c:IsA("Frame") then
+				c:Destroy()
+			end
+		end
+		local order = 0
+		local function chip(text: string, icon: string, tone: UiKit.Tri)
+			order += 1
+			local row = Instance.new("Frame")
+			row.BackgroundTransparency = 1
+			row.AutomaticSize = Enum.AutomaticSize.X
+			row.Size = UDim2.fromOffset(0, textSize + 8)
+			row.LayoutOrder = order
+			row.Parent = holder
+			local rl = Instance.new("UIListLayout")
+			rl.FillDirection = Enum.FillDirection.Horizontal
+			rl.VerticalAlignment = Enum.VerticalAlignment.Center
+			rl.Padding = UDim.new(0, 4)
+			rl.Parent = row
+			local t = makeLabel(row, textSize, text)
+			t.AutomaticSize = Enum.AutomaticSize.X
+			t.Size = UDim2.fromOffset(0, textSize + 8)
+			t.LayoutOrder = 1
+			UiKit.ApplyTri(t, tone)
+			local ic = UiKit.CreateIcon(row, icon, textSize + 6)
+			ic.LayoutOrder = 2
+		end
+		if reward.Gems and reward.Gems > 0 then
+			chip(`+{GameConfig.FormatNumber(reward.Gems)}`, "gem", UiKit.Gradients.Gems)
+		end
+		if reward.Cash and reward.Cash > 0 then
+			chip(`+${GameConfig.FormatNumber(reward.Cash)}`, "cash", UiKit.Gradients.Cash)
+		end
+	end
+	return holder, set
 end
 
 function RewardsWindow.Build(parent: Instance, ctx: RewardsWindowContext): RewardsWindowHandle
-	local addCorner = UiKit.AddCorner
-	local addStroke = UiKit.AddStroke
-
-	local modal = Instance.new("Frame")
-	modal.Name = "RewardsModal"
-	modal.AnchorPoint = Vector2.new(0.5, 0.5)
-	modal.Position = UDim2.fromScale(0.5, 0.5)
-	modal.Size = UDim2.fromOffset(660, 450)
-	modal.BackgroundColor3 = Color3.fromRGB(34, 38, 46)
-	modal.Visible = false
-	modal.ZIndex = 10
-	modal.Parent = parent
-	addCorner(modal, 14)
-	addStroke(modal, Color3.fromRGB(15, 18, 24), 3.2, Enum.ApplyStrokeMode.Border)
-
-	local header = Instance.new("Frame")
-	header.Size = UDim2.new(1, 0, 0, 54)
-	header.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-	header.Parent = modal
-	addCorner(header, 14)
-	UiKit.AddGlossGradient(header, Color3.fromRGB(245, 155, 45))
-	addStroke(header, Color3.fromRGB(32, 18, 10), 2.2, Enum.ApplyStrokeMode.Border)
-
-	local title = Instance.new("TextLabel")
-	title.Position = UDim2.fromOffset(18, 6)
-	title.Size = UDim2.fromOffset(320, 40)
-	title.BackgroundTransparency = 1
-	title.Font = Enum.Font.FredokaOne
-	title.TextSize = 28
-	title.TextXAlignment = Enum.TextXAlignment.Left
-	title.TextColor3 = Color3.fromRGB(255, 255, 255)
-	title.Text = "🎁 Rewards & Quests"
-	title.Parent = header
-	addStroke(title, Color3.fromRGB(28, 16, 8), 2.5)
-
-	UiKit.CreateBevelButton({
-		Name = "CloseBtn",
-		Parent = header,
-		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, -10, 0.5, 1),
-		Size = UDim2.fromOffset(40, 40),
-		Color = Color3.fromRGB(235, 55, 65),
-		CornerRadius = 9,
-		Text = "X",
-		TextSize = 22,
-		OnClick = function()
-			UiKit.ToggleModalAnimated(modal, ctx.ModalScrim, false)
-		end,
+	local win = UiKit.CreateWindow({
+		Name = "RewardsModal",
+		Parent = parent,
+		Title = "Rewards & Quests",
+		Size = UDim2.fromOffset(960, 540),
+		Position = UDim2.fromScale(0.5, 0.52),
+		Header = {
+			Light = Color3.fromRGB(143, 214, 255),
+			Mid = Color3.fromRGB(62, 162, 255),
+			Dark = Color3.fromRGB(26, 111, 224),
+		},
 	})
+	local modal = win.Frame
+	win.Close.Activated:Connect(function()
+		UiKit.ToggleModalAnimated(modal, ctx.ModalScrim, false)
+	end)
 
-	-- Tab Bar
+	local content = Instance.new("Frame")
+	content.Name = "Content"
+	content.Position = UDim2.fromOffset(20, 14)
+	content.Size = UDim2.new(1, -40, 1, -28)
+	content.BackgroundTransparency = 1
+	content.Parent = win.Body
+
 	local dailyPage = Instance.new("Frame")
-	local linePage = Instance.new("Frame")
-
-	local _, dailyTabFace = UiKit.CreateBevelButton({
-		Name = "DailyTabBtn",
-		Parent = modal,
-		Position = UDim2.fromOffset(16, 62),
-		Size = UDim2.fromOffset(195, 38),
-		Color = Color3.fromRGB(70, 195, 255),
-		CornerRadius = 10,
-		Text = "📅 Daily Rewards",
-		TextSize = 19,
-		OnClick = function()
-			dailyPage.Visible = true
-			linePage.Visible = false
-		end,
-	})
-
-	local _, lineTabFace = UiKit.CreateBevelButton({
-		Name = "QuestLineTabBtn",
-		Parent = modal,
-		Position = UDim2.fromOffset(222, 62),
-		Size = UDim2.fromOffset(195, 38),
-		Color = Color3.fromRGB(165, 95, 245),
-		CornerRadius = 10,
-		Text = "🏆 Quest Line",
-		TextSize = 19,
-		OnClick = function()
-			dailyPage.Visible = false
-			linePage.Visible = true
-		end,
-	})
-	local _ = dailyTabFace
-	local _ = lineTabFace
-
-	local countdownLabel = Instance.new("TextLabel")
-	countdownLabel.AnchorPoint = Vector2.new(1, 0)
-	countdownLabel.Position = UDim2.new(1, -18, 0, 68)
-	countdownLabel.Size = UDim2.fromOffset(200, 26)
-	countdownLabel.BackgroundTransparency = 1
-	countdownLabel.Font = Enum.Font.FredokaOne
-	countdownLabel.TextSize = 18
-	countdownLabel.TextXAlignment = Enum.TextXAlignment.Right
-	countdownLabel.TextColor3 = Color3.fromRGB(200, 215, 235)
-	countdownLabel.Text = "Resets in 24h 00m"
-	countdownLabel.Parent = modal
-	addStroke(countdownLabel, Color3.fromRGB(15, 18, 25), 1.8)
-
-	-- ============================================================================
-	-- TAB 1: DAILY PAGE (7-Tile Calendar on top + 3 Daily Quests below)
-	-- ============================================================================
 	dailyPage.Name = "DailyPage"
-	dailyPage.Position = UDim2.fromOffset(14, 108)
-	dailyPage.Size = UDim2.new(1, -28, 1, -120)
+	dailyPage.Position = UDim2.fromOffset(0, 62)
+	dailyPage.Size = UDim2.new(1, 0, 1, -62)
 	dailyPage.BackgroundTransparency = 1
-	dailyPage.Visible = true
-	dailyPage.Parent = modal
+	dailyPage.Parent = content
+	local linePage = Instance.new("Frame")
+	linePage.Name = "QuestLinePage"
+	linePage.Position = UDim2.fromOffset(0, 62)
+	linePage.Size = UDim2.new(1, 0, 1, -62)
+	linePage.BackgroundTransparency = 1
+	linePage.Visible = false
+	linePage.Parent = content
 
-	local calendarCard = Instance.new("Frame")
-	calendarCard.Name = "CalendarCard"
-	calendarCard.Size = UDim2.new(1, 0, 0, 126)
-	calendarCard.BackgroundColor3 = Color3.fromRGB(26, 30, 38)
-	calendarCard.Parent = dailyPage
-	addCorner(calendarCard, 12)
-	addStroke(calendarCard, Color3.fromRGB(16, 18, 24), 2.2, Enum.ApplyStrokeMode.Border)
+	local tabs = UiKit.CreateTabs(content, {
+		{ Id = "Daily", Text = "Daily Rewards", Icon = "calendar", Gradient = UiKit.Gradients.Blue },
+		{ Id = "Line", Text = "Quest Line", Icon = "trophy", Gradient = UiKit.Gradients.SlimesNav },
+	}, function(id: string)
+		dailyPage.Visible = id == "Daily"
+		linePage.Visible = id == "Line"
+	end)
+	tabs.Frame.Position = UDim2.fromOffset(0, 0)
 
-	local stripFrame = Instance.new("Frame")
-	stripFrame.Position = UDim2.fromOffset(10, 10)
-	stripFrame.Size = UDim2.new(1, -155, 0, 106)
-	stripFrame.BackgroundTransparency = 1
-	stripFrame.Parent = calendarCard
+	-- ============================================================================
+	-- DAILY TAB
+	-- ============================================================================
+	local sectionLabel = makeLabel(dailyPage, 24, "Daily Login · Day 1", Enum.TextXAlignment.Left)
+	sectionLabel.Position = UDim2.fromOffset(4, 0)
+	sectionLabel.Size = UDim2.fromOffset(400, 30)
+	local clockIcon = UiKit.CreateIcon(dailyPage, "clock", 26)
+	clockIcon.AnchorPoint = Vector2.new(1, 0)
+	clockIcon.Position = UDim2.new(1, -176, 0, 2)
+	local countdownLabel = makeLabel(dailyPage, 18, "Resets in 24h 00m", Enum.TextXAlignment.Right)
+	countdownLabel.AnchorPoint = Vector2.new(1, 0)
+	countdownLabel.Position = UDim2.new(1, -4, 0, 2)
+	countdownLabel.Size = UDim2.fromOffset(170, 26)
+	countdownLabel.TextColor3 = Color3.fromRGB(215, 225, 240)
 
+	local strip = Instance.new("Frame")
+	strip.Position = UDim2.fromOffset(0, 36)
+	strip.Size = UDim2.new(1, 0, 0, 124)
+	strip.BackgroundTransparency = 1
+	strip.Parent = dailyPage
 	local stripLayout = Instance.new("UIListLayout")
 	stripLayout.FillDirection = Enum.FillDirection.Horizontal
-	stripLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-	stripLayout.Padding = UDim.new(0, 6)
-	stripLayout.Parent = stripFrame
+	stripLayout.Padding = UDim.new(0, 8)
+	stripLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	stripLayout.Parent = strip
 
-	type DayTileUI = {
+	type DayTile = {
 		Frame: Frame,
 		Stroke: UIStroke,
-		StatusLabel: TextLabel,
+		Check: ImageLabel,
+		Glow: ImageLabel,
+		Gem: ImageLabel,
+		Claim: TextButton,
+		Tone: UiKit.Tri,
 	}
-	local dayTiles: { DayTileUI } = {}
+	local dayTiles: { DayTile } = {}
+	local dayCount = #GameConfig.Gems.DailyRewards
 	for i, gems in GameConfig.Gems.DailyRewards do
+		local isEpic = i == dayCount
 		local tile = Instance.new("Frame")
 		tile.Name = `DayTile_{i}`
-		tile.Size = UDim2.fromOffset(62, 102)
-		tile.BackgroundColor3 = Color3.fromRGB(42, 48, 62)
-		tile.Parent = stripFrame
-		addCorner(tile, 10)
-		local stroke = addStroke(tile, Color3.fromRGB(18, 20, 28), 2.2, Enum.ApplyStrokeMode.Border)
+		tile.LayoutOrder = i
+		tile.Size = UDim2.new(1 / dayCount, -7, 0, 124)
+		tile.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+		tile.Parent = strip
+		UiKit.AddCorner(tile, 16)
+		local tone = if isEpic then UiKit.Gradients.SlimesNav else DARK_TONE
+		UiKit.ApplyTri(tile, tone)
+		local stroke = UiKit.AddFrameOutline(tile, 4)
 
-		local dayHdr = Instance.new("TextLabel")
-		dayHdr.Position = UDim2.fromOffset(2, 6)
-		dayHdr.Size = UDim2.new(1, -4, 0, 20)
-		dayHdr.BackgroundTransparency = 1
-		dayHdr.Font = Enum.Font.FredokaOne
-		dayHdr.TextSize = 15
-		dayHdr.TextColor3 = Color3.fromRGB(255, 235, 110)
-		dayHdr.Text = `DAY {i}`
-		dayHdr.Parent = tile
-		addStroke(dayHdr, Color3.fromRGB(15, 18, 25), 1.6)
+		local glow = Instance.new("ImageLabel")
+		glow.AnchorPoint = Vector2.new(0.5, 0.5)
+		glow.Position = UDim2.fromScale(0.5, 0.5)
+		glow.Size = UDim2.new(1, 50, 1, 50)
+		glow.BackgroundTransparency = 1
+		glow.Image = UiAssets.Textures.glow
+		glow.ImageColor3 = Color3.fromRGB(255, 225, 74)
+		glow.ImageTransparency = 1
+		glow.ZIndex = 0
+		glow.Parent = tile
 
-		local gemIcon = Instance.new("TextLabel")
-		gemIcon.Position = UDim2.fromOffset(2, 28)
-		gemIcon.Size = UDim2.new(1, -4, 0, 42)
-		gemIcon.BackgroundTransparency = 1
-		gemIcon.Font = Enum.Font.FredokaOne
-		gemIcon.TextSize = 19
-		gemIcon.TextColor3 = Color3.fromRGB(125, 215, 255)
-		gemIcon.Text = `💎\n+{gems}`
-		gemIcon.Parent = tile
-		addStroke(gemIcon, Color3.fromRGB(15, 18, 25), 1.8)
+		local dayLbl = makeLabel(tile, 17, `DAY {i}`)
+		dayLbl.Position = UDim2.fromOffset(0, 6)
+		dayLbl.Size = UDim2.new(1, 0, 0, 22)
+		UiKit.ApplyTri(dayLbl, UiKit.Gradients.Luck)
 
-		local statusLbl = Instance.new("TextLabel")
-		statusLbl.Position = UDim2.fromOffset(2, 76)
-		statusLbl.Size = UDim2.new(1, -4, 0, 20)
-		statusLbl.BackgroundTransparency = 1
-		statusLbl.Font = Enum.Font.FredokaOne
-		statusLbl.TextSize = 13
-		statusLbl.TextColor3 = Color3.fromRGB(180, 190, 210)
-		statusLbl.Text = "LOCKED"
-		statusLbl.Parent = tile
-		addStroke(statusLbl, Color3.fromRGB(15, 18, 25), 1.5)
+		local gem = UiKit.CreateIcon(tile, "gem", if isEpic then 60 else 44)
+		gem.AnchorPoint = Vector2.new(0.5, 0)
+		gem.Position = UDim2.new(0.5, 0, 0, if isEpic then 26 else 32)
+		local amount = makeLabel(tile, 20, `+{gems}`)
+		amount.Position = UDim2.fromOffset(0, 80)
+		amount.Size = UDim2.new(1, 0, 0, 24)
+		UiKit.ApplyTri(amount, UiKit.Gradients.Gems)
 
-		dayTiles[i] = {
-			Frame = tile,
-			Stroke = stroke,
-			StatusLabel = statusLbl,
-		}
+		local check = UiKit.CreateIcon(tile, "check", 30)
+		check.AnchorPoint = Vector2.new(1, 0)
+		check.Position = UDim2.new(1, -4, 0, 2)
+		check.Visible = false
+		check.ZIndex = 5
+
+		local claim = UiKit.CreateGradientButton({
+			Name = "ClaimDailyBtn",
+			Parent = tile,
+			AnchorPoint = Vector2.new(0.5, 1),
+			Position = UDim2.new(0.5, 0, 1, -6),
+			Size = UDim2.new(1, -14, 0, 30),
+			Kind = "green",
+			CornerRadius = 10,
+			Text = "CLAIM!",
+			TextSize = 16,
+			OnClick = ctx.OnClaimDaily,
+		})
+		claim.Visible = false
+		claim.ZIndex = 6
+
+		dayTiles[i] = { Frame = tile, Stroke = stroke, Check = check, Glow = glow, Gem = gem, Claim = claim, Tone = tone }
 	end
 
-	local _, claimDailyFace, claimDailyLbl = UiKit.CreateBevelButton({
-		Name = "ClaimDailyBtn",
-		Parent = calendarCard,
-		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, -12, 0.5, 2),
-		Size = UDim2.fromOffset(132, 82),
-		Color = Color3.fromRGB(85, 235, 85),
-		CornerRadius = 11,
-		Text = "CLAIM\nTODAY!",
-		TextSize = 21,
-		OnClick = function()
-			ctx.OnClaimDaily()
-		end,
-	})
+	-- 3 daily quest cards
+	local questHolder = Instance.new("Frame")
+	questHolder.Position = UDim2.fromOffset(0, 172)
+	questHolder.Size = UDim2.new(1, 0, 1, -172)
+	questHolder.BackgroundTransparency = 1
+	questHolder.Parent = dailyPage
+	local questLayout = Instance.new("UIListLayout")
+	questLayout.Padding = UDim.new(0, 8)
+	questLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	questLayout.Parent = questHolder
 
-	-- Daily Quests Container (3 cards below calendar)
-	local dailyQuestsContainer = Instance.new("Frame")
-	dailyQuestsContainer.Name = "DailyQuestsContainer"
-	dailyQuestsContainer.Position = UDim2.fromOffset(0, 136)
-	dailyQuestsContainer.Size = UDim2.new(1, 0, 1, -136)
-	dailyQuestsContainer.BackgroundTransparency = 1
-	dailyQuestsContainer.Parent = dailyPage
-
-	local dailyQuestsLayout = Instance.new("UIListLayout")
-	dailyQuestsLayout.Padding = UDim.new(0, 8)
-	dailyQuestsLayout.Parent = dailyQuestsContainer
-
-	type DailyCardUI = {
+	type QuestCard = {
 		Row: Frame,
-		TitleLabel: TextLabel,
-		RewardLabel: TextLabel,
-		BarFill: Frame,
-		BarText: TextLabel,
-		ButtonFace: Frame,
+		Title: TextLabel,
+		SetReward: (GameConfig.QuestReward) -> (),
+		Bar: UiKit.ProgressBarParts,
+		Button: TextButton,
 		ButtonLabel: TextLabel,
 	}
-	local dailyCards: { DailyCardUI } = {}
+	local questCards: { QuestCard } = {}
 	for i = 1, GameConfig.Quests.DailyCount do
-		local row = Instance.new("Frame")
+		local row = makeCard(questHolder, 16)
 		row.Name = `DailyQuestCard_{i}`
-		row.Size = UDim2.new(1, 0, 0, 58)
-		row.BackgroundColor3 = Color3.fromRGB(28, 32, 42)
-		row.Parent = dailyQuestsContainer
-		addCorner(row, 10)
-		addStroke(row, Color3.fromRGB(16, 18, 24), 2, Enum.ApplyStrokeMode.Border)
+		row.LayoutOrder = i
+		row.Size = UDim2.new(1, 0, 0, 62)
 
-		local qTitle = Instance.new("TextLabel")
-		qTitle.Position = UDim2.fromOffset(12, 4)
-		qTitle.Size = UDim2.fromOffset(320, 24)
-		qTitle.BackgroundTransparency = 1
-		qTitle.Font = Enum.Font.FredokaOne
-		qTitle.TextSize = 18
-		qTitle.TextXAlignment = Enum.TextXAlignment.Left
-		qTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-		qTitle.Text = "Daily Quest"
-		qTitle.Parent = row
-		addStroke(qTitle, Color3.fromRGB(15, 18, 25), 1.8)
+		local title = makeLabel(row, 20, "Daily Quest", Enum.TextXAlignment.Left)
+		title.Position = UDim2.fromOffset(16, 4)
+		title.Size = UDim2.fromOffset(460, 26)
+		title.TextTruncate = Enum.TextTruncate.AtEnd
+		local bar = UiKit.CreateProgressBar(row, UDim2.fromOffset(500, 22), UiKit.Gradients.Green)
+		bar.Frame.Position = UDim2.fromOffset(16, 32)
+		bar.Label.TextSize = 15
 
-		local qReward = Instance.new("TextLabel")
-		qReward.Position = UDim2.fromOffset(336, 4)
-		qReward.Size = UDim2.fromOffset(145, 24)
-		qReward.BackgroundTransparency = 1
-		qReward.Font = Enum.Font.FredokaOne
-		qReward.TextSize = 17
-		qReward.TextXAlignment = Enum.TextXAlignment.Right
-		qReward.TextColor3 = Color3.fromRGB(120, 215, 255)
-		qReward.Text = "💎 +15"
-		qReward.Parent = row
-		addStroke(qReward, Color3.fromRGB(15, 18, 25), 1.8)
+		local rewardHolder, setReward = makeRewardChips(row, 22)
+		rewardHolder.AnchorPoint = Vector2.new(1, 0.5)
+		rewardHolder.Position = UDim2.new(1, -190, 0.5, 0)
+		rewardHolder.Size = UDim2.fromOffset(180, 34)
 
-		local barBg = Instance.new("Frame")
-		barBg.Position = UDim2.fromOffset(12, 32)
-		barBg.Size = UDim2.fromOffset(468, 18)
-		barBg.BackgroundColor3 = Color3.fromRGB(15, 18, 24)
-		barBg.Parent = row
-		addCorner(barBg, 8)
-
-		local barFill = Instance.new("Frame")
-		barFill.Size = UDim2.fromScale(0, 1)
-		barFill.BackgroundColor3 = Color3.fromRGB(85, 235, 95)
-		barFill.Parent = barBg
-		addCorner(barFill, 8)
-
-		local barTxt = Instance.new("TextLabel")
-		barTxt.Size = UDim2.fromScale(1, 1)
-		barTxt.BackgroundTransparency = 1
-		barTxt.Font = Enum.Font.FredokaOne
-		barTxt.TextSize = 14
-		barTxt.TextColor3 = Color3.fromRGB(255, 255, 255)
-		barTxt.Text = "0 / 1"
-		barTxt.ZIndex = 3
-		barTxt.Parent = barBg
-		addStroke(barTxt, Color3.fromRGB(12, 14, 18), 1.5)
-
-		local idxCopy = i
-		local _, btnFace, btnLbl = UiKit.CreateBevelButton({
+		local idx = i
+		local btn = UiKit.CreateGradientButton({
 			Name = "ClaimBtn",
 			Parent = row,
 			AnchorPoint = Vector2.new(1, 0.5),
-			Position = UDim2.new(1, -10, 0.5, 1),
-			Size = UDim2.fromOffset(126, 40),
-			Color = Color3.fromRGB(85, 235, 85),
-			CornerRadius = 9,
+			Position = UDim2.new(1, -12, 0.5, 0),
+			Size = UDim2.fromOffset(150, 46),
+			Kind = "green",
+			CornerRadius = 14,
 			Text = "CLAIM!",
-			TextSize = 18,
+			TextSize = 22,
 			OnClick = function()
-				ctx.OnClaimQuest("Daily", idxCopy)
+				ctx.OnClaimQuest("Daily", idx)
 			end,
 		})
-
-		dailyCards[i] = {
+		questCards[i] = {
 			Row = row,
-			TitleLabel = qTitle,
-			RewardLabel = qReward,
-			BarFill = barFill,
-			BarText = barTxt,
-			ButtonFace = btnFace,
-			ButtonLabel = btnLbl,
+			Title = title,
+			SetReward = setReward,
+			Bar = bar,
+			Button = btn,
+			ButtonLabel = btn:FindFirstChild("Label", true) :: TextLabel,
 		}
 	end
 
 	-- ============================================================================
-	-- TAB 2: QUEST LINE PAGE (Current Step Hero Card + Next 2 Preview Cards)
+	-- QUEST LINE TAB
 	-- ============================================================================
-	linePage.Name = "QuestLinePage"
-	linePage.Position = UDim2.fromOffset(14, 108)
-	linePage.Size = UDim2.new(1, -28, 1, -120)
-	linePage.BackgroundTransparency = 1
-	linePage.Visible = false
-	linePage.Parent = modal
+	local totalSteps = #GameConfig.Quests.Line
+	local track = Instance.new("Frame")
+	track.Name = "Track"
+	track.Size = UDim2.new(1, 0, 0, 24)
+	track.BackgroundTransparency = 1
+	track.Parent = linePage
+	local trackLayout = Instance.new("UIListLayout")
+	trackLayout.FillDirection = Enum.FillDirection.Horizontal
+	trackLayout.Padding = UDim.new(0, 6)
+	trackLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	trackLayout.Parent = track
+	local segments: { Frame } = {}
+	local segGlows: { ImageLabel } = {}
+	for i = 1, totalSteps do
+		local seg = Instance.new("Frame")
+		seg.Name = "Seg_" .. i
+		seg.LayoutOrder = i
+		seg.Size = UDim2.new(1 / totalSteps, -6, 1, 0)
+		seg.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+		seg.Parent = track
+		UiKit.AddCorner(seg, 12)
+		UiKit.ApplyTri(seg, DARK_TONE)
+		UiKit.AddFrameOutline(seg, 3)
+		local glow = Instance.new("ImageLabel")
+		glow.AnchorPoint = Vector2.new(0.5, 0.5)
+		glow.Position = UDim2.fromScale(0.5, 0.5)
+		glow.Size = UDim2.new(1, 24, 1, 24)
+		glow.BackgroundTransparency = 1
+		glow.Image = UiAssets.Textures.glow
+		glow.ImageColor3 = Color3.fromRGB(255, 178, 28)
+		glow.ImageTransparency = 1
+		glow.ZIndex = 0
+		glow.Parent = seg
+		segments[i] = seg
+		segGlows[i] = glow
+	end
 
-	local heroCard = Instance.new("Frame")
-	heroCard.Name = "CurrentStepCard"
-	heroCard.Size = UDim2.new(1, 0, 0, 162)
-	heroCard.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-	heroCard.Parent = linePage
-	addCorner(heroCard, 12)
-	UiKit.AddGlossGradient(heroCard, Color3.fromRGB(68, 52, 115))
-	addStroke(heroCard, Color3.fromRGB(20, 16, 34), 2.5, Enum.ApplyStrokeMode.Border)
+	-- Hero card (178 high): gold diagonal gradient
+	local hero = Instance.new("Frame")
+	hero.Name = "CurrentStepCard"
+	hero.Position = UDim2.fromOffset(0, 38)
+	hero.Size = UDim2.new(1, 0, 0, 178)
+	hero.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	hero.Parent = linePage
+	UiKit.AddCorner(hero, 20)
+	local heroGradient = UiKit.ApplyTri(hero, { Light = Color3.fromRGB(255, 244, 150), Mid = Color3.fromRGB(255, 196, 40), Dark = Color3.fromRGB(226, 128, 10) })
+	heroGradient.Rotation = 35
+	local heroStroke = UiKit.AddFrameOutline(hero, 4)
+	UiKit.AddStripes(hero, 20)
+	local heroGlow = Instance.new("ImageLabel")
+	heroGlow.AnchorPoint = Vector2.new(0.5, 0.5)
+	heroGlow.Position = UDim2.fromScale(0.5, 0.5)
+	heroGlow.Size = UDim2.new(1, 90, 1, 90)
+	heroGlow.BackgroundTransparency = 1
+	heroGlow.Image = UiAssets.Textures.glow
+	heroGlow.ImageColor3 = Color3.fromRGB(255, 255, 255)
+	heroGlow.ImageTransparency = 1
+	heroGlow.ZIndex = 0
+	heroGlow.Parent = hero
 
-	local stepBadge = Instance.new("TextLabel")
-	stepBadge.Position = UDim2.fromOffset(16, 10)
-	stepBadge.Size = UDim2.fromOffset(220, 26)
-	stepBadge.BackgroundTransparency = 1
-	stepBadge.Font = Enum.Font.FredokaOne
-	stepBadge.TextSize = 20
-	stepBadge.TextXAlignment = Enum.TextXAlignment.Left
-	stepBadge.TextColor3 = Color3.fromRGB(255, 225, 85)
-	stepBadge.Text = "STEP 1 / 12"
-	stepBadge.Parent = heroCard
-	addStroke(stepBadge, Color3.fromRGB(15, 18, 25), 2)
+	local heroIconPlate = UiKit.CreateIconPlate(hero, "target", 96)
+	heroIconPlate.Position = UDim2.fromOffset(18, 20)
+	local stepBadge = makeLabel(hero, 20, "STEP 1 / 12", Enum.TextXAlignment.Left)
+	stepBadge.Position = UDim2.fromOffset(130, 12)
+	stepBadge.Size = UDim2.fromOffset(260, 26)
+	local heroTitle = makeLabel(hero, 32, "Quest", Enum.TextXAlignment.Left)
+	heroTitle.Position = UDim2.fromOffset(130, 38)
+	heroTitle.Size = UDim2.new(1, -150, 0, 42)
+	heroTitle.TextTruncate = Enum.TextTruncate.AtEnd
+	local heroBar = UiKit.CreateProgressBar(hero, UDim2.new(1, -350, 0, 30), UiKit.Gradients.Green)
+	heroBar.Frame.Position = UDim2.fromOffset(130, 90)
+	heroBar.Label.TextSize = 18
+	local rewardKicker = makeLabel(hero, 16, "REWARD", Enum.TextXAlignment.Left)
+	rewardKicker.Position = UDim2.fromOffset(130, 128)
+	rewardKicker.Size = UDim2.fromOffset(80, 30)
+	local heroRewardHolder, setHeroReward = makeRewardChips(hero, 26)
+	heroRewardHolder.Position = UDim2.fromOffset(212, 126)
+	heroRewardHolder.Size = UDim2.fromOffset(240, 34)
+	local heroRewardLayout = heroRewardHolder:FindFirstChildOfClass("UIListLayout") :: UIListLayout
+	heroRewardLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
 
-	local heroRewardLabel = Instance.new("TextLabel")
-	heroRewardLabel.AnchorPoint = Vector2.new(1, 0)
-	heroRewardLabel.Position = UDim2.new(1, -16, 0, 10)
-	heroRewardLabel.Size = UDim2.fromOffset(260, 26)
-	heroRewardLabel.BackgroundTransparency = 1
-	heroRewardLabel.Font = Enum.Font.FredokaOne
-	heroRewardLabel.TextSize = 22
-	heroRewardLabel.TextXAlignment = Enum.TextXAlignment.Right
-	heroRewardLabel.TextColor3 = Color3.fromRGB(120, 225, 255)
-	heroRewardLabel.Text = "💎 +15"
-	heroRewardLabel.Parent = heroCard
-	addStroke(heroRewardLabel, Color3.fromRGB(15, 18, 25), 2)
-
-	local heroTitle = Instance.new("TextLabel")
-	heroTitle.Position = UDim2.fromOffset(16, 40)
-	heroTitle.Size = UDim2.new(1, -32, 0, 36)
-	heroTitle.BackgroundTransparency = 1
-	heroTitle.Font = Enum.Font.FredokaOne
-	heroTitle.TextSize = 26
-	heroTitle.TextXAlignment = Enum.TextXAlignment.Left
-	heroTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-	heroTitle.Text = "Throw bait 1 time"
-	heroTitle.Parent = heroCard
-	addStroke(heroTitle, Color3.fromRGB(15, 18, 25), 2.2)
-
-	local heroBarBg = Instance.new("Frame")
-	heroBarBg.Position = UDim2.fromOffset(16, 86)
-	heroBarBg.Size = UDim2.fromOffset(420, 28)
-	heroBarBg.BackgroundColor3 = Color3.fromRGB(16, 18, 26)
-	heroBarBg.Parent = heroCard
-	addCorner(heroBarBg, 10)
-	addStroke(heroBarBg, Color3.fromRGB(10, 12, 18), 1.8, Enum.ApplyStrokeMode.Border)
-
-	local heroBarFill = Instance.new("Frame")
-	heroBarFill.Size = UDim2.fromScale(0, 1)
-	heroBarFill.BackgroundColor3 = Color3.fromRGB(95, 245, 95)
-	heroBarFill.Parent = heroBarBg
-	addCorner(heroBarFill, 10)
-
-	local heroBarTxt = Instance.new("TextLabel")
-	heroBarTxt.Size = UDim2.fromScale(1, 1)
-	heroBarTxt.BackgroundTransparency = 1
-	heroBarTxt.Font = Enum.Font.FredokaOne
-	heroBarTxt.TextSize = 18
-	heroBarTxt.TextColor3 = Color3.fromRGB(255, 255, 255)
-	heroBarTxt.Text = "0 / 1"
-	heroBarTxt.ZIndex = 3
-	heroBarTxt.Parent = heroBarBg
-	addStroke(heroBarTxt, Color3.fromRGB(12, 14, 18), 1.8)
-
-	local _, heroClaimFace, heroClaimLbl = UiKit.CreateBevelButton({
+	local heroClaim = UiKit.CreateGradientButton({
 		Name = "ClaimLineQuestBtn",
-		Parent = heroCard,
+		Parent = hero,
 		AnchorPoint = Vector2.new(1, 1),
-		Position = UDim2.new(1, -16, 1, -14),
-		Size = UDim2.fromOffset(172, 54),
-		Color = Color3.fromRGB(85, 235, 85),
-		CornerRadius = 11,
+		Position = UDim2.new(1, -18, 1, -16),
+		Size = UDim2.fromOffset(150, 70),
+		Kind = "green",
+		CornerRadius = 18,
 		Text = "CLAIM!",
-		TextSize = 22,
+		TextSize = 28,
 		OnClick = function()
 			ctx.OnClaimQuest("Line", nil)
 		end,
 	})
+	local heroClaimLabel = heroClaim:FindFirstChild("Label", true) :: TextLabel
 
-	-- Next 2 Preview Cards
-	type PreviewCardUI = {
-		Row: Frame,
-		TitleLabel: TextLabel,
-		RewardLabel: TextLabel,
-	}
-	local previewCards: { PreviewCardUI } = {}
+	local comingUp = makeLabel(linePage, 20, "COMING UP", Enum.TextXAlignment.Left)
+	comingUp.Position = UDim2.fromOffset(4, 224)
+	comingUp.Size = UDim2.fromOffset(200, 24)
+	comingUp.TextColor3 = Color3.fromRGB(215, 225, 240)
+
+	type PreviewCard = { Row: Frame, Title: TextLabel, SetReward: (GameConfig.QuestReward) -> () }
+	local previews: { PreviewCard } = {}
 	for i = 1, 2 do
-		local pRow = Instance.new("Frame")
-		pRow.Name = `NextStepPreview_{i}`
-		pRow.Position = UDim2.fromOffset(0, 174 + (i - 1) * 76)
-		pRow.Size = UDim2.new(1, 0, 0, 68)
-		pRow.BackgroundColor3 = Color3.fromRGB(25, 28, 36)
-		pRow.BackgroundTransparency = 0.2
-		pRow.Parent = linePage
-		addCorner(pRow, 10)
-		addStroke(pRow, Color3.fromRGB(16, 18, 24), 1.8, Enum.ApplyStrokeMode.Border)
-
-		local pTitle = Instance.new("TextLabel")
-		pTitle.Position = UDim2.fromOffset(14, 8)
-		pTitle.Size = UDim2.new(1, -190, 0, 52)
-		pTitle.BackgroundTransparency = 1
-		pTitle.Font = Enum.Font.FredokaOne
-		pTitle.TextSize = 18
-		pTitle.TextWrapped = true
-		pTitle.TextXAlignment = Enum.TextXAlignment.Left
-		pTitle.TextColor3 = Color3.fromRGB(155, 165, 185)
-		pTitle.Text = "🔒 Step 2"
-		pTitle.Parent = pRow
-		addStroke(pTitle, Color3.fromRGB(12, 14, 18), 1.6)
-
-		local pReward = Instance.new("TextLabel")
-		pReward.AnchorPoint = Vector2.new(1, 0.5)
-		pReward.Position = UDim2.new(1, -16, 0.5, 0)
-		pReward.Size = UDim2.fromOffset(160, 32)
-		pReward.BackgroundTransparency = 1
-		pReward.Font = Enum.Font.FredokaOne
-		pReward.TextSize = 18
-		pReward.TextXAlignment = Enum.TextXAlignment.Right
-		pReward.TextColor3 = Color3.fromRGB(130, 175, 210)
-		pReward.Text = ""
-		pReward.Parent = pRow
-		addStroke(pReward, Color3.fromRGB(12, 14, 18), 1.6)
-
-		previewCards[i] = {
-			Row = pRow,
-			TitleLabel = pTitle,
-			RewardLabel = pReward,
-		}
+		local row = makeCard(linePage, 16)
+		row.Name = `NextStepPreview_{i}`
+		row.Position = UDim2.fromOffset(0, 250 + (i - 1) * 64)
+		row.Size = UDim2.new(1, 0, 0, 56)
+		row.BackgroundTransparency = 0.3
+		local lock = UiKit.CreateIconPlate(row, "lock", 40)
+		lock.Position = UDim2.fromOffset(10, 8)
+		local title = makeLabel(row, 20, "", Enum.TextXAlignment.Left)
+		title.Position = UDim2.fromOffset(62, 0)
+		title.Size = UDim2.new(1, -300, 1, 0)
+		title.TextTruncate = Enum.TextTruncate.AtEnd
+		title.TextTransparency = 0.3
+		local holder, setReward = makeRewardChips(row, 20)
+		holder.AnchorPoint = Vector2.new(1, 0.5)
+		holder.Position = UDim2.new(1, -16, 0.5, 0)
+		holder.Size = UDim2.fromOffset(220, 30)
+		previews[i] = { Row = row, Title = title, SetReward = setReward }
 	end
 
+	local doneCard = makeCard(linePage, 20, UiKit.Gradients.Green)
+	doneCard.Name = "AllDoneCard"
+	doneCard.Position = UDim2.fromOffset(0, 38)
+	doneCard.Size = UDim2.new(1, 0, 0, 178)
+	doneCard.Visible = false
+	local doneLabel = makeLabel(doneCard, 44, "All quests done!")
+	doneLabel.Size = UDim2.fromScale(1, 1)
+
+	-- ============================================================================
+	-- REFRESH
+	-- ============================================================================
 	local function refresh(state: any): boolean
 		local canClaimDaily = state.DailyCanClaim == true
-		local nextStreakDay = math.clamp(tonumber(state.DailyNextDay) or 1, 1, #GameConfig.Gems.DailyRewards)
-		local curStreak = math.clamp(tonumber(state.DailyStreak) or 0, 0, #GameConfig.Gems.DailyRewards)
+		local nextStreakDay = math.clamp(tonumber(state.DailyNextDay) or 1, 1, dayCount)
+		local curStreak = math.clamp(tonumber(state.DailyStreak) or 0, 0, dayCount)
 		local activeDay = if canClaimDaily then nextStreakDay else math.max(1, curStreak)
 
-		countdownLabel.Text = formatCountdown(tonumber(state.SecondsUntilNextDay) or 0)
+		sectionLabel.Text = `Daily Login · Day {activeDay}`
+		countdownLabel.Text = UiLayout.FormatCountdown(tonumber(state.SecondsUntilNextDay) or 0)
 
-		for i, tileUi in dayTiles do
+		for i, t in dayTiles do
 			local isClaimed = (canClaimDaily and i < activeDay) or (not canClaimDaily and i <= curStreak)
-			local isToday = (canClaimDaily and i == activeDay)
-			if isClaimed then
-				tileUi.Frame.BackgroundColor3 = Color3.fromRGB(38, 82, 52)
-				tileUi.Stroke.Color = Color3.fromRGB(95, 235, 115)
-				tileUi.StatusLabel.Text = "✓ DONE"
-				tileUi.StatusLabel.TextColor3 = Color3.fromRGB(115, 255, 130)
-			elseif isToday then
-				tileUi.Frame.BackgroundColor3 = Color3.fromRGB(78, 65, 28)
-				tileUi.Stroke.Color = Color3.fromRGB(255, 215, 55)
-				tileUi.StatusLabel.Text = "TODAY!"
-				tileUi.StatusLabel.TextColor3 = Color3.fromRGB(255, 235, 95)
+			local isToday = canClaimDaily and i == activeDay
+			t.Check.Visible = isClaimed
+			t.Claim.Visible = isToday
+			t.Glow.ImageTransparency = if isToday then 0.45 else 1
+			t.Gem.ImageTransparency = if isClaimed then 0.45 else 0
+			if isToday then
+				UiKit.SetTone(t.Frame, UiKit.Gradients.Luck)
+				t.Frame.BackgroundTransparency = 0
+				t.Stroke.Color = UiKit.Colors.White
+			elseif isClaimed then
+				UiKit.SetTone(t.Frame, t.Tone)
+				t.Frame.BackgroundTransparency = 0.45
+				t.Stroke.Color = UiKit.Colors.Ink
 			else
-				tileUi.Frame.BackgroundColor3 = Color3.fromRGB(32, 36, 46)
-				tileUi.Stroke.Color = Color3.fromRGB(18, 20, 28)
-				tileUi.StatusLabel.Text = "LOCKED"
-				tileUi.StatusLabel.TextColor3 = Color3.fromRGB(130, 140, 160)
+				UiKit.SetTone(t.Frame, t.Tone)
+				t.Frame.BackgroundTransparency = if i == dayCount then 0 else 0.2
+				t.Stroke.Color = UiKit.Colors.Ink
 			end
 		end
 
-		if canClaimDaily then
-			claimDailyFace.BackgroundColor3 = Color3.fromRGB(85, 235, 85)
-			claimDailyLbl.Text = `CLAIM!\n(Day {activeDay})`
-			claimDailyLbl.TextTransparency = 0
-		else
-			claimDailyFace.BackgroundColor3 = Color3.fromRGB(65, 72, 86)
-			claimDailyLbl.Text = "CLAIMED\nTODAY ✓"
-			claimDailyLbl.TextTransparency = 0.2
-		end
-
-		-- Daily Quests
+		-- Daily quests
 		local dailyList = if type(state.DailyQuests) == "table" then state.DailyQuests else {}
-		for i, card in dailyCards do
+		for i, card in questCards do
 			local slot = dailyList[i]
 			local def = if slot and type(slot.Id) == "string" then GameConfig.QuestsById[slot.Id] else nil
 			if slot and def then
 				card.Row.Visible = true
 				local prog = math.clamp(tonumber(slot.Progress) or 0, 0, def.Target)
 				local ratio = if def.Target > 0 then prog / def.Target else 0
-				card.TitleLabel.Text = def.Title
-				card.RewardLabel.Text = formatRewardText(def.Reward)
-				card.BarFill.Size = UDim2.fromScale(ratio, 1)
-				card.BarText.Text = `{GameConfig.FormatNumber(prog)} / {GameConfig.FormatNumber(def.Target)}`
-
+				card.Title.Text = def.Title
+				card.SetReward(def.Reward)
+				card.Bar.SetFraction(ratio)
+				card.Bar.Label.Text = `{GameConfig.FormatNumber(prog)} / {GameConfig.FormatNumber(def.Target)}`
 				if slot.Claimed == true then
-					card.ButtonFace.BackgroundColor3 = Color3.fromRGB(62, 68, 82)
-					card.ButtonLabel.Text = "CLAIMED ✓"
-					card.ButtonLabel.TextTransparency = 0.25
+					UiKit.SetButtonTone(card.Button, UiKit.Gradients.Grey, 0.3)
+					card.ButtonLabel.Text = "CLAIMED"
 				elseif prog >= def.Target then
-					card.ButtonFace.BackgroundColor3 = Color3.fromRGB(85, 235, 85)
+					UiKit.SetButtonTone(card.Button, UiKit.Gradients.Green, 0)
 					card.ButtonLabel.Text = "CLAIM!"
-					card.ButtonLabel.TextTransparency = 0
 				else
-					card.ButtonFace.BackgroundColor3 = Color3.fromRGB(58, 92, 138)
-					card.ButtonLabel.Text = `{math.floor(ratio * 100)}%`
-					card.ButtonLabel.TextTransparency = 0.25
+					UiKit.SetButtonTone(card.Button, UiKit.Gradients.Grey, 0.4)
+					card.ButtonLabel.Text = "CLAIM!"
 				end
 			else
 				card.Row.Visible = false
 			end
 		end
 
-		-- Quest Line
+		-- Quest line
 		local step = tonumber(state.QuestLineStep) or 1
-		local totalSteps = #GameConfig.Quests.Line
 		local curDef = GameConfig.Quests.Line[step]
+		for i, seg in segments do
+			local st = UiLayout.TrackState(i, step)
+			UiKit.SetTone(seg, if st == "done" then UiKit.Gradients.Green elseif st == "current" then UiKit.Gradients.Orange else DARK_TONE)
+			segGlows[i].ImageTransparency = if st == "current" then 0.4 else 1
+		end
+		hero.Visible = curDef ~= nil
+		doneCard.Visible = curDef == nil
+		for i, p in previews do
+			local nextDef = GameConfig.Quests.Line[step + i]
+			p.Row.Visible = nextDef ~= nil and curDef ~= nil
+			if nextDef then
+				p.Title.Text = `Step {step + i}: {nextDef.Title}`
+				p.SetReward(nextDef.Reward)
+			end
+		end
+		comingUp.Visible = curDef ~= nil and GameConfig.Quests.Line[step + 1] ~= nil
 		if curDef then
 			local prog = math.clamp(tonumber(state.QuestLineProgress) or 0, 0, curDef.Target)
 			local ratio = if curDef.Target > 0 then prog / curDef.Target else 0
-			stepBadge.Text = `QUEST LINE — STEP {step} / {totalSteps}`
+			local claimable = prog >= curDef.Target
+			stepBadge.Text = `STEP {step} / {totalSteps}`
 			heroTitle.Text = curDef.Title
-			heroRewardLabel.Text = formatRewardText(curDef.Reward)
-			heroBarFill.Size = UDim2.fromScale(ratio, 1)
-			heroBarTxt.Text = `{GameConfig.FormatNumber(prog)} / {GameConfig.FormatNumber(curDef.Target)}`
-			if prog >= curDef.Target then
-				heroClaimFace.BackgroundColor3 = Color3.fromRGB(85, 235, 85)
-				heroClaimLbl.Text = "CLAIM!"
-				heroClaimLbl.TextTransparency = 0
-			else
-				heroClaimFace.BackgroundColor3 = Color3.fromRGB(65, 72, 92)
-				heroClaimLbl.Text = "IN PROGRESS"
-				heroClaimLbl.TextTransparency = 0.25
-			end
-		else
-			stepBadge.Text = `QUEST LINE — COMPLETE ({totalSteps} / {totalSteps})`
-			heroTitle.Text = "🎉 All Quest Line steps completed!"
-			heroRewardLabel.Text = "✓ MAX"
-			heroBarFill.Size = UDim2.fromScale(1, 1)
-			heroBarTxt.Text = "COMPLETED"
-			heroClaimFace.BackgroundColor3 = Color3.fromRGB(62, 68, 82)
-			heroClaimLbl.Text = "DONE ✓"
-			heroClaimLbl.TextTransparency = 0.25
-		end
-
-		for i, pCard in previewCards do
-			local nextIdx = step + i
-			local nextDef = GameConfig.Quests.Line[nextIdx]
-			if nextDef then
-				pCard.Row.Visible = true
-				pCard.TitleLabel.Text = `🔒 Step {nextIdx}: {nextDef.Title}\n(Complete Step {step} to unlock)`
-				pCard.RewardLabel.Text = formatRewardText(nextDef.Reward)
-			else
-				pCard.Row.Visible = false
-			end
+			setHeroReward(curDef.Reward)
+			heroBar.SetFraction(ratio)
+			heroBar.Label.Text = `{GameConfig.FormatNumber(prog)} / {GameConfig.FormatNumber(curDef.Target)}`
+			UiKit.SetButtonTone(heroClaim, if claimable then UiKit.Gradients.Green else UiKit.Gradients.Grey, if claimable then 0 else 0.4)
+			heroClaimLabel.Text = "CLAIM!"
+			heroStroke.Color = if claimable then UiKit.Colors.White else UiKit.Colors.Ink
+			heroGlow.ImageTransparency = if claimable then 0.5 else 1
 		end
 
 		return canClaimDaily or QuestLogic.HasAnyClaimableQuest(state)
 	end
 
-	return {
-		Frame = modal,
-		Refresh = refresh,
-	}
+	tabs.Select("Daily")
+
+	return { Frame = modal, Refresh = refresh }
 end
 
 return RewardsWindow

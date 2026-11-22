@@ -114,6 +114,24 @@ function UiLayout.PerSecond(total: number, elapsed: number): number
 	return total / elapsed
 end
 
+-- Quest line track segment (spec 4d): done = green, current = orange with glow, future = dark.
+export type TrackState = "done" | "current" | "future"
+
+function UiLayout.TrackState(segment: number, currentStep: number): TrackState
+	if segment < currentStep then
+		return "done"
+	elseif segment == currentStep then
+		return "current"
+	end
+	return "future"
+end
+
+-- "Resets in 05h 12m"
+function UiLayout.FormatCountdown(seconds: number): string
+	local clean = math.max(0, math.floor(seconds))
+	return string.format("Resets in %02dh %02dm", math.floor(clean / 3600), math.floor((clean % 3600) / 60))
+end
+
 -- Number of slots the hotbar always shows, so the bar does not jump.
 UiLayout.HotbarSlots = 5
 
