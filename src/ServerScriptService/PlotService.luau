@@ -15,6 +15,11 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
+-- Slimes in a base wander around the yard (slot grid + margin)
+local ROAM_SPEED = 3.2 -- studs/second while travelling
+local ROAM_MARGIN_X = 5
+local ROAM_MARGIN_Z = 4
+
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared:WaitForChild("GameConfig"))
 local ProgressionLogic = require(Shared:WaitForChild("ProgressionLogic"))
@@ -28,6 +33,8 @@ local LeaderboardService = require(script.Parent:WaitForChild("LeaderboardServic
 local PlotService = {}
 
 local plotSlotModels: { [Instance]: { [number]: Model } } = {}
+-- slot pad each roaming slime belongs to (its Pick Up prompt anchor follows the slime)
+local slimeSlotPart: { [Model]: BasePart } = setmetatable({}, { __mode = "k" }) :: any
 local plotLayoutSig: { [Instance]: string } = {}
 local collectCooldowns: { [Player]: number } = {}
 
@@ -142,6 +149,15 @@ function PlotService.RefreshPlotVisuals(plot: Model, profile: ProgressionLogic.P
 			currentModels[idx] = nil
 		end
 
+		-- Roam area: the slot grid plus a margin, so slimes wander around the yard but stay inside the fence
+		local rMinX, rMaxX, rMinZ, rMaxZ = math.huge, -math.huge, math.huge, -math.huge
+		for _, sp in slotsFolder:GetChildren() do
+			if sp:IsA("BasePart") then
+				rMinX, rMaxX = math.min(rMinX, sp.Position.X), math.max(rMaxX, sp.Position.X)
+				rMinZ, rMaxZ = math.min(rMinZ, sp.Position.Z), math.max(rMaxZ, sp.Position.Z)
+			end
+		end
+
 		for _, slotPart in slotsFolder:GetChildren() do
 			if slotPart:IsA("BasePart") then
 				local slotIdx = (slotPart:GetAttribute("SlotIndex") :: number?)
@@ -155,7 +171,11 @@ function PlotService.RefreshPlotVisuals(plot: Model, profile: ProgressionLogic.P
 
 				WorldUi.SetSlot(slotPart, slotIdx, unlocked, inst)
 
-				local prompt = slotPart:FindFirstChildOfClass("ProximityPrompt")
+				local prompt = slotPart:FindFirstChildWhichIsA("ProximityPrompt", true)
+				local promptAnchor = slotPart:FindFirstChild("PromptAnchor") :: Attachment?
+				if promptAnchor and not inst then
+					promptAnchor.Position = Vector3.zero -- no slime here: the prompt sits back on the pad
+				end
 				if prompt then
 					prompt.Enabled = unlocked
 					if inst then
@@ -177,9 +197,32 @@ function PlotService.RefreshPlotVisuals(plot: Model, profile: ProgressionLogic.P
 						* CFrame.Angles(0, math.pi, 0)
 					slimeModel:SetAttribute("SlotBaseY", baseCf.Position.Y)
 					slimeModel:SetAttribute("SlotPhase", slotIdx * 0.75)
+					slimeModel:SetAttribute("RoamMinX", rMinX - ROAM_MARGIN_X)
+					slimeModel:SetAttribute("RoamMaxX", rMaxX + ROAM_MARGIN_X)
+					slimeModel:SetAttribute("RoamMinZ", rMinZ - ROAM_MARGIN_Z)
+					slimeModel:SetAttribute("RoamMaxZ", rMaxZ + ROAM_MARGIN_Z)
 					SlimeFactory.PositionSlime(slimeModel, baseCf, 0)
 					slimeModel.Parent = plot
 					SlimeFactory.MakeRigid(slimeModel) -- weld to the root: one replicated part per slime while bobbing
+					slimeSlotPart[slimeModel] = slotPart
+					-- Sit the slime's lowest point exactly on the yard floor (no floating)
+					local floorPart = plot:FindFirstChild("Floor")
+					if floorPart and floorPart:IsA("BasePart") then
+						local floorTop = floorPart.Position.Y + floorPart.Size.Y * 0.5
+						local bbCf, bbSize = slimeModel:GetBoundingBox()
+						local gap = (bbCf.Position.Y - bbSize.Y * 0.5) - floorTop
+						if math.abs(gap) < 3 then
+							slimeModel:SetAttribute("SlotBaseY", baseCf.Position.Y - gap)
+						end
+					end
+					-- The slot sign follows the roaming slime; the client only shows it when a player is right next to it
+					local sign = slotPart:FindFirstChild("SlotSign")
+					if sign and sign:IsA("BillboardGui") and slimeModel.PrimaryPart then
+						sign.Adornee = slimeModel.PrimaryPart
+						sign.StudsOffset = Vector3.new(0, slimeModel:GetExtentsSize().Y * 0.5 + 3, 0)
+						sign.Enabled = false
+						sign:SetAttribute("ProximityOnly", true)
+					end
 					currentModels[slotIdx] = slimeModel
 				end
 			end
@@ -592,7 +635,7 @@ local function wirePlotInteractions(plot: Model)
 				local slotIdx = (slotPart:GetAttribute("SlotIndex") :: number?)
 					or tonumber(string.match(slotPart.Name, "%d+"))
 					or 1
-				local prompt = slotPart:FindFirstChildOfClass("ProximityPrompt")
+				local prompt = slotPart:FindFirstChildWhichIsA("ProximityPrompt", true)
 				if not prompt then
 					prompt = Instance.new("ProximityPrompt")
 					prompt.ActionText = "Place Slime"
@@ -602,6 +645,15 @@ local function wirePlotInteractions(plot: Model)
 					prompt.RequiresLineOfSight = false
 					prompt.Parent = slotPart
 				end
+				-- The prompt lives on an attachment so it can follow the roaming slime (the pad itself never moves)
+				local anchor = slotPart:FindFirstChild("PromptAnchor") :: Attachment?
+				if not anchor then
+					anchor = Instance.new("Attachment")
+					anchor.Name = "PromptAnchor"
+					anchor.Parent = slotPart
+				end
+				prompt.Parent = anchor
+				prompt.MaxActivationDistance = 8 -- only when you're right next to the slime
 				prompt.Triggered:Connect(function(triggerPlayer: Player)
 					local owner = getPlotOwner(plot)
 					if owner ~= triggerPlayer then
@@ -993,6 +1045,8 @@ function PlotService.Init()
 
 	local accum = 0
 	local autoTrainAccum = 0
+	local roamRng = Random.new()
+	local roamState: { [Model]: any } = setmetatable({}, { __mode = "k" }) :: any
 	RunService.Heartbeat:Connect(function(dt: number)
 		stepTraining()
 		autoTrainAccum += dt
@@ -1007,9 +1061,59 @@ function PlotService.Init()
 				if primary then
 					local baseY = (slimeModel:GetAttribute("SlotBaseY") :: number?) or primary.Position.Y
 					local phase = (slimeModel:GetAttribute("SlotPhase") :: number?) or 0
-					local wave = math.sin(accum * 3.4 + phase)
-					local pos = Vector3.new(primary.Position.X, baseY + math.max(0, wave) * 0.45, primary.Position.Z)
-					SlimeFactory.PositionSlime(slimeModel, CFrame.new(pos) * CFrame.Angles(0, math.pi, 0), -wave * 0.14)
+					local st = roamState[slimeModel]
+					if not st then
+						st = {
+							X = primary.Position.X,
+							Z = primary.Position.Z,
+							Yaw = math.pi,
+							Wait = roamRng:NextNumber(0.2, 3.5),
+							TX = primary.Position.X,
+							TZ = primary.Position.Z,
+							Moving = false,
+						}
+						roamState[slimeModel] = st
+					end
+					local moving = false
+					if st.Moving then
+						local dx, dz = st.TX - st.X, st.TZ - st.Z
+						local dist = math.sqrt(dx * dx + dz * dz)
+						local step = ROAM_SPEED * dt
+						if dist <= step then
+							st.X, st.Z = st.TX, st.TZ
+							st.Moving = false
+							st.Wait = roamRng:NextNumber(1.5, 5.0)
+						else
+							st.X += dx / dist * step
+							st.Z += dz / dist * step
+							-- turn smoothly toward the direction of travel (the slime's front is -Z)
+							local goalYaw = math.atan2(-dx, -dz)
+							local diff = (goalYaw - st.Yaw + math.pi) % (2 * math.pi) - math.pi
+							st.Yaw += diff * math.min(1, dt * 8)
+							moving = true
+						end
+					else
+						st.Wait -= dt
+						if st.Wait <= 0 then
+							local minX = (slimeModel:GetAttribute("RoamMinX") :: number?) or st.X
+							local maxX = (slimeModel:GetAttribute("RoamMaxX") :: number?) or st.X
+							local minZ = (slimeModel:GetAttribute("RoamMinZ") :: number?) or st.Z
+							local maxZ = (slimeModel:GetAttribute("RoamMaxZ") :: number?) or st.Z
+							st.TX = roamRng:NextNumber(minX, maxX)
+							st.TZ = roamRng:NextNumber(minZ, maxZ)
+							st.Moving = true
+						end
+					end
+					-- hop while travelling, gentle idle bob otherwise
+					local wave = math.sin(accum * (if moving then 9 else 3.4) + phase)
+					local lift = if moving then math.abs(wave) * 0.6 else math.max(0, wave) * 0.12
+					local pos = Vector3.new(st.X, baseY + lift, st.Z)
+					SlimeFactory.PositionSlime(slimeModel, CFrame.new(pos) * CFrame.Angles(0, st.Yaw, 0), -wave * 0.14)
+					local padPart = slimeSlotPart[slimeModel]
+					local promptAnchor = if padPart then padPart:FindFirstChild("PromptAnchor") :: Attachment? else nil
+					if promptAnchor then
+						promptAnchor.WorldPosition = Vector3.new(st.X, baseY + 1, st.Z)
+					end
 				end
 			end
 		end
