@@ -29,6 +29,10 @@ local EVENT_NAMES = {
 	"RequestCollect",
 	"RequestTeleport",
 	"ToastNotify",
+	"UnlockPopup", -- S->C { Kind = "bait" | "zone", Kicker, Name, Detail, Icon, ShowShop }: unlock pop-up (spec 4f)
+	"RequestClaimOffline", -- C->S: claim the Welcome Back offline earnings (1x)
+	"RequestGift", -- C->S { TargetUserId, Kind = "pack" | "egg", ItemId, Count }: start a gift purchase for another player
+	"GiftReady", -- S->C { ProductId }: gift validated, client may prompt the developer product
 }
 
 local folderCache: Folder? = nil

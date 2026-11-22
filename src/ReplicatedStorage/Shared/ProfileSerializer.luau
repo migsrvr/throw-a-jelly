@@ -128,6 +128,7 @@ function ProfileSerializer.Serialize(profile: ProgressionLogic.PlayerProfile): {
 		TotalPullUps = profile.TotalPullUps,
 		IndexMilestonesClaimed = profile.IndexMilestonesClaimed,
 		HighestZoneReached = profile.HighestZoneReached,
+		LastSeen = profile.LastSeen,
 		DailyStreak = profile.DailyStreak,
 		LastDailyClaimDay = profile.LastDailyClaimDay,
 		QuestLineStep = profile.QuestLineStep,
@@ -160,6 +161,7 @@ function ProfileSerializer.Deserialize(data: any): ProgressionLogic.PlayerProfil
 	p.TotalPullUps = readInt(data.TotalPullUps, 0, 0)
 	p.IndexMilestonesClaimed = readInt(data.IndexMilestonesClaimed, 0, 0, #GameConfig.Gems.IndexMilestones)
 	p.HighestZoneReached = readInt(data.HighestZoneReached, 0, 0, #GameConfig.Zones)
+	p.LastSeen = readInt(data.LastSeen, 0, 0)
 	p.DailyStreak = readInt(data.DailyStreak, 0, 0)
 	p.LastDailyClaimDay = readInt(data.LastDailyClaimDay, -1, -1)
 	p.ClaimedFreeGift = data.ClaimedFreeGift == true

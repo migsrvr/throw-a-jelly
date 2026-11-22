@@ -116,6 +116,7 @@ function DataService.Save(player: Player, profile: ProgressionLogic.PlayerProfil
 	if not ds then
 		return false
 	end
+	profile.LastSeen = os.time()
 	local data = ProfileSerializer.Serialize(profile)
 	inFlight += 1
 	local ok, err = pcall(function()

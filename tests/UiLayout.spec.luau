@@ -134,4 +134,13 @@ return function(t: any)
 			expect(UiLayout.ChanceBarFraction(5, 0)).toBe(0)
 		end)
 	end)
+
+	describe("UiLayout - away time", function()
+		it("formats minutes and hours", function()
+			expect(UiLayout.FormatAway(30)).toBe("1m")
+			expect(UiLayout.FormatAway(45 * 60)).toBe("45m")
+			expect(UiLayout.FormatAway(2 * 3600 + 15 * 60)).toBe("2h 15m")
+			expect(UiLayout.FormatAway(4 * 3600)).toBe("4h")
+		end)
+	end)
 end

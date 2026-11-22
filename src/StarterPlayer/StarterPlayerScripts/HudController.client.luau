@@ -11,6 +11,7 @@
 	- 3D Bouncing Yellow Arrow (▼) & Golden Floor Chevron Trail (>>>)
 ]]
 
+local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -36,6 +37,9 @@ local IndexWindow = require(HudWindows:WaitForChild("IndexWindow"))
 local SlimesWindow = require(HudWindows:WaitForChild("SlimesWindow"))
 local RewardsWindow = require(HudWindows:WaitForChild("RewardsWindow"))
 local RobuxStoreWindow = require(HudWindows:WaitForChild("RobuxStoreWindow"))
+local WelcomeBackWindow = require(HudWindows:WaitForChild("WelcomeBackWindow"))
+local UnlockPopups = require(HudWindows:WaitForChild("UnlockPopups"))
+local GiftPicker = require(HudWindows:WaitForChild("GiftPicker"))
 
 local stateSync = Remotes.GetEvent("PlayerStateSync")
 local toastNotify = Remotes.GetEvent("ToastNotify")
@@ -699,11 +703,45 @@ local slimesWin = SlimesWindow.Build(screenGui, {
 	end,
 })
 
+-- Gift picker: only items whose developer product exists can be gifted (all 0 = GIFT! stays hidden)
+local giftItems: { GiftPicker.GiftItem } = {}
+for _, pack in GameConfig.Robux.GemPacks do
+	if pack.ProductId > 0 then
+		table.insert(giftItems, { Kind = "pack", ItemId = pack.Id, Count = 1, Name = pack.Name })
+	end
+end
+for _, egg in GameConfig.ShopEggs do
+	if egg.Buy1ProductId > 0 then
+		table.insert(giftItems, { Kind = "egg", ItemId = egg.Id, Count = 1, Name = `{egg.Name} x1` })
+	end
+	if egg.Buy3ProductId > 0 then
+		table.insert(giftItems, { Kind = "egg", ItemId = egg.Id, Count = 3, Name = `{egg.Name} x3` })
+	end
+end
+local giftPicker = GiftPicker.Build(screenGui, {
+	ModalScrim = modalScrim,
+	Items = giftItems,
+	OnGift = function(targetUserId: number, item: GiftPicker.GiftItem)
+		Remotes.GetEvent("RequestGift"):FireServer({
+			TargetUserId = targetUserId,
+			Kind = item.Kind,
+			ItemId = item.ItemId,
+			Count = item.Count,
+		})
+	end,
+})
+Remotes.GetEvent("GiftReady").OnClientEvent:Connect(function(payload: any)
+	if type(payload) == "table" and type(payload.ProductId) == "number" then
+		MarketplaceService:PromptProductPurchase(localPlayer, payload.ProductId)
+	end
+end)
+
 local robuxWin = RobuxStoreWindow.Build(screenGui, {
 	ModalScrim = modalScrim,
 	OnToast = showToast,
 	BindShopEntry = bindShopEntry,
 	BuyShopItem = buyShopItem,
+	OnGift = if #giftItems > 0 then giftPicker.Open else nil,
 })
 
 local allModals: { Frame } = {
@@ -723,6 +761,38 @@ local function toggleExclusiveModal(target: Frame)
 	end
 	UiKit.ToggleModalAnimated(target, modalScrim, willOpen)
 end
+
+-- Welcome Back (offline income) and unlock pop-ups (server-driven)
+local welcomeBack: WelcomeBackWindow.WelcomeBackHandle
+welcomeBack = WelcomeBackWindow.Build(screenGui, {
+	ModalScrim = modalScrim,
+	OnClaim = function()
+		Remotes.GetEvent("RequestClaimOffline"):FireServer()
+		welcomeBack.Hide()
+	end,
+	OnClaimDouble = function()
+		if GameConfig.Offline.DoubleProductId > 0 then
+			MarketplaceService:PromptProductPurchase(localPlayer, GameConfig.Offline.DoubleProductId)
+			welcomeBack.Hide()
+		else
+			showToast("2X is coming soon!", "red")
+		end
+	end,
+})
+local welcomeShown = false
+
+local unlockPopups = UnlockPopups.Build(screenGui, {
+	OnOpenUpgrades = function()
+		if not upgradesWin.Frame.Visible then
+			toggleExclusiveModal(upgradesWin.Frame)
+		end
+	end,
+})
+Remotes.GetEvent("UnlockPopup").OnClientEvent:Connect(function(payload: any)
+	if type(payload) == "table" and type(payload.Name) == "string" then
+		unlockPopups.Push(payload)
+	end
+end)
 
 -- Left Column (3 buttons, top to bottom): Index, Shop, Upgrades
 createNavButton(leftNav, "IndexNavBtn", "index", "Index", "indexnav", 1, function()
@@ -899,6 +969,10 @@ stateSync.OnClientEvent:Connect(function(newState: any)
 			end
 		end
 		refreshAllUi()
+		if not welcomeShown and (tonumber(newState.OfflineEarnings) or 0) > 0 then
+			welcomeShown = true
+			welcomeBack.Show(newState.OfflineEarnings, tonumber(newState.OfflineAwaySeconds) or 0)
+		end
 	end
 end)
 

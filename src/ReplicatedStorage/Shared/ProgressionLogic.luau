@@ -67,6 +67,7 @@ export type PlayerProfile = {
 	DailyQuests: { QuestLogic.DailyQuestSlot }, -- today's 3 daily quests
 	ProcessedReceipts: { string }, -- capped recent Developer Product PurchaseIds (saved to DataStore)
 	OwnedPasses: { [string]: boolean }, -- runtime-only Game Pass ownership map (not saved to DataStore)
+	LastSeen: number, -- os.time() of the last save (0 = never); drives Welcome Back offline income
 }
 
 export type GemAward = {
@@ -178,6 +179,7 @@ function ProgressionLogic.CreateInitialProfile(): PlayerProfile
 		DailyQuests = {},
 		ProcessedReceipts = {},
 		OwnedPasses = {},
+		LastSeen = 0,
 	}
 	local starter = makeSlimeInstance(profile, "meadow_sprout", "NORMAL")
 	profile.PlacedSlimesBySlot[1] = starter
@@ -257,6 +259,40 @@ end
 function ProgressionLogic.GetCatchGems(slimeDef: GameConfig.SlimeDef, mutationId: string): number
 	local cfg = GameConfig.Gems
 	return (cfg.RarityDrops[slimeDef.Rarity] or 0) + (cfg.MutationDrops[mutationId] or 0)
+end
+
+-- Welcome Back: cash earned while away. Pure. 0 when never seen, away too short, or no income.
+function ProgressionLogic.ComputeOfflineEarnings(incomePerSec: number, awaySeconds: number): number
+	local cfg = GameConfig.Offline
+	if incomePerSec <= 0 or awaySeconds < cfg.MinAwaySeconds then
+		return 0
+	end
+	return math.floor(incomePerSec * math.min(awaySeconds, cfg.MaxAwaySeconds) * cfg.Rate)
+end
+
+-- Unlock pop-ups (spec 4f). Returns the pop-ups to show now and the updated "already told" markers.
+-- `seen.BaitTierOffered` = highest bait tier we already announced as affordable; `seen.ZoneSeen` = highest zone announced.
+export type UnlockSeen = { BaitTierOffered: number, ZoneSeen: number }
+export type UnlockPopup = { Kind: "bait" | "zone", Index: number }
+
+function ProgressionLogic.NextUnlockPopups(
+	cash: number,
+	baitTier: number,
+	highestZone: number,
+	seen: UnlockSeen
+): ({ UnlockPopup }, UnlockSeen)
+	local popups: { UnlockPopup } = {}
+	local out: UnlockSeen = { BaitTierOffered = seen.BaitTierOffered, ZoneSeen = seen.ZoneSeen }
+	local nextBait = GameConfig.BaitTiers[baitTier + 1]
+	if nextBait and cash >= nextBait.Cost and out.BaitTierOffered < baitTier + 1 then
+		out.BaitTierOffered = baitTier + 1
+		table.insert(popups, { Kind = "bait", Index = baitTier + 1 })
+	end
+	if highestZone > out.ZoneSeen then
+		out.ZoneSeen = highestZone
+		table.insert(popups, { Kind = "zone", Index = highestZone })
+	end
+	return popups, out
 end
 
 function ProgressionLogic.GetDayNumber(unixSeconds: number): number

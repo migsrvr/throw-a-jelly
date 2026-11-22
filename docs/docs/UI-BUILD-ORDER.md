@@ -36,3 +36,17 @@ Files: `PlotService.luau` and a new `LeaderboardService.luau`. Billboards, custo
 
 ## 9. New systems (4e, 4f)
 Welcome Back needs offline income on the server. Unlock pop-ups need a server event for "bait affordable" and "first zone reached".
+
+---
+
+## Status (all steps built)
+
+Steps 0-9 are in. Notes on what differs from the mockups or needs a decision:
+
+- **Welcome Back** (`GameConfig.Offline`): pays 50% of income for the time away, min 2 min, capped at 4 h. Edit `Rate`, `MinAwaySeconds`, `MaxAwaySeconds`. The 2X button stays grey until `DoubleProductId` is a real developer product id (the server already handles that receipt).
+- **Gifting**: the whole flow exists (picker, `RequestGift`, receipt grants to the target). The GIFT! button in the Shop only appears once at least one gem pack or egg has a real `ProductId`.
+- **Unlock pop-ups**: server-driven from `PlayerStateService.Sync` (next bait affordable, first zone reached). Rules are in `ProgressionLogic.NextUnlockPopups`.
+- **Leaderboards**: show the players in the current server and refresh every 60 s. Rows are 32 px high (the panel is 16x22 studs, so the spec's 42 px rows do not fit). Cross-server boards would need OrderedDataStores.
+- **Throw reveal**: no slime ViewportFrame, rarity rings or screen shake (the slime is a 3D model in the world).
+- **Custom prompt**: the hold ring is a fade plus a thin progress bar, not a true conic ring.
+- **Slot signs**: filled slot signs replace the slime model's own billboard.

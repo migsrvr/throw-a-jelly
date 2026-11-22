@@ -140,6 +140,17 @@ function UiLayout.ChanceBarFraction(chance: number, topChance: number): number
 	return math.clamp(chance / topChance, 0, 1)
 end
 
+-- "Away for 2h 15m" (Welcome Back). Under an hour shows minutes only; never below 1m.
+function UiLayout.FormatAway(seconds: number): string
+	local mins = math.max(1, math.floor(seconds / 60))
+	if mins < 60 then
+		return `{mins}m`
+	end
+	local hours = math.floor(mins / 60)
+	local rest = mins % 60
+	return if rest == 0 then `{hours}h` else `{hours}h {rest}m`
+end
+
 -- Number of slots the hotbar always shows, so the bar does not jump.
 UiLayout.HotbarSlots = 5
 

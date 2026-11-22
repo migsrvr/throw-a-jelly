@@ -245,6 +245,16 @@ GameConfig.AutoThrow = {
 
 -- Saving (DataStoreService). Bump SchemaVersion when the saved shape changes and teach
 -- ProfileSerializer.Deserialize to read the older version.
+-- Welcome Back (offline income). Design decisions, tune freely: players earn Rate x their income for the time
+-- they were away, up to MaxAwaySeconds, and only if they were gone at least MinAwaySeconds.
+GameConfig.Offline = {
+	MinAwaySeconds = 120,
+	MaxAwaySeconds = 4 * 3600,
+	Rate = 0.5,
+	DoubleProductId = 0, -- developer product for "2X + Robux 25"; 0 = coming soon
+	DoubleRobux = 25,
+}
+
 GameConfig.Save = {
 	DataStoreName = "PlayerProfile_v1",
 	KeyPrefix = "Player_",

@@ -20,6 +20,10 @@ local DataService = require(script.Parent:WaitForChild("DataService"))
 local PlayerStateService = {}
 
 local profiles: { [Player]: ProgressionLogic.PlayerProfile } = {}
+-- Welcome Back: cash earned while away, offered until claimed (runtime only; not saved)
+local offlineOffers: { [Player]: { Cash: number, AwaySeconds: number } } = {}
+-- Unlock pop-ups already announced this session
+local unlockSeen: { [Player]: ProgressionLogic.UnlockSeen } = {}
 local listeners: { (Player, ProgressionLogic.PlayerProfile) -> () } = {}
 
 local function ensureLeaderstats(player: Player)
@@ -146,11 +150,60 @@ function PlayerStateService.Sync(player: Player)
 		TotalPullUps = profile.TotalPullUps,
 		PendingIncome = math.floor(profile.PendingIncome),
 		IncomePerSec = incomePerSec,
+		OfflineEarnings = if offlineOffers[player] then offlineOffers[player].Cash else 0,
+		OfflineAwaySeconds = if offlineOffers[player] then offlineOffers[player].AwaySeconds else 0,
 	})
+
+	-- Unlock pop-ups: next bait became affordable / first zone reached
+	local seen = unlockSeen[player]
+	if seen then
+		local popups, newSeen = ProgressionLogic.NextUnlockPopups(profile.Cash, profile.BaitTier, profile.HighestZoneReached, seen)
+		unlockSeen[player] = newSeen
+		for _, popup in popups do
+			if popup.Kind == "bait" then
+				local nextTier = GameConfig.BaitTiers[popup.Index]
+				local curTier = GameConfig.BaitTiers[popup.Index - 1]
+				Remotes.GetEvent("UnlockPopup"):FireClient(player, {
+					Kind = "bait",
+					Kicker = "NEW BAIT AVAILABLE",
+					Name = nextTier.Name,
+					Detail = `Luck {curTier.LuckMultiplier}x to {nextTier.LuckMultiplier}x for ${GameConfig.FormatNumber(nextTier.Cost)}`,
+					Icon = "carrot",
+					ShowShop = true,
+				})
+			else
+				local zone = GameConfig.Zones[popup.Index]
+				local gems = GameConfig.Gems.FirstZoneReach[popup.Index] or 0
+				Remotes.GetEvent("UnlockPopup"):FireClient(player, {
+					Kind = "zone",
+					Kicker = "NEW ZONE REACHED",
+					Name = zone.Name,
+					Detail = if gems > 0 then `+{gems} Gems` else "Keep throwing!",
+					Icon = ({ "zone_meadow", "zone_crystal", "zone_lava", "zone_frost", "zone_candy" })[popup.Index],
+					ShowShop = false,
+				})
+			end
+		end
+	end
 
 	for _, fn in listeners do
 		task.spawn(fn, player, profile)
 	end
+end
+
+-- Pays the Welcome Back offer once. multiplier 2 comes from the "2X" developer product (MonetizationService).
+function PlayerStateService.ClaimOffline(player: Player, multiplier: number): boolean
+	local profile = profiles[player]
+	local offer = offlineOffers[player]
+	if not profile or not offer then
+		return false
+	end
+	offlineOffers[player] = nil
+	local amount = offer.Cash * multiplier
+	profile.Cash += amount
+	PlayerStateService.Toast(player, `Welcome back! +${GameConfig.FormatNumber(amount)}`, "cash")
+	PlayerStateService.Sync(player)
+	return true
 end
 
 function PlayerStateService.Toast(player: Player, message: string, kind: string?)
@@ -192,6 +245,15 @@ function PlayerStateService.Init()
 			return
 		end
 		profiles[player] = profile
+		unlockSeen[player] = { BaitTierOffered = profile.BaitTier, ZoneSeen = profile.HighestZoneReached }
+		-- Welcome Back: offline income since the last save
+		if loaded and profile.LastSeen > 0 then
+			local away = os.time() - profile.LastSeen
+			local earned = ProgressionLogic.ComputeOfflineEarnings(ProgressionLogic.GetIncomePerSecond(profile), away)
+			if earned > 0 then
+				offlineOffers[player] = { Cash = earned, AwaySeconds = away }
+			end
+		end
 		PlayerStateService.Sync(player)
 		if not loaded then
 			local msg = if RunService:IsStudio()
@@ -206,6 +268,8 @@ function PlayerStateService.Init()
 		local profile = profiles[player]
 		profiles[player] = nil
 		lastPurchaseAt[player] = nil
+		offlineOffers[player] = nil
+		unlockSeen[player] = nil
 		DataService.SaveAndRelease(player, profile)
 	end)
 
@@ -223,6 +287,10 @@ function PlayerStateService.Init()
 				PlayerStateService.Sync(player)
 			end
 		end
+	end)
+
+	Remotes.GetEvent("RequestClaimOffline").OnServerEvent:Connect(function(player: Player)
+		PlayerStateService.ClaimOffline(player, 1)
 	end)
 
 	Remotes.GetEvent("RequestClaimDaily").OnServerEvent:Connect(function(player: Player)
