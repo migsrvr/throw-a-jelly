@@ -62,6 +62,14 @@ local function bindShopLabel(label: TextLabel?, itemId: string, optionIndex: num
 	end
 end
 
+-- Structured bindings: the callback receives the whole listing entry plus the synced state
+type ShopEntryBinding = { ItemId: string, Apply: (entry: ProgressionLogic.ShopListingEntry, state: any) -> () }
+local shopEntryBindings: { ShopEntryBinding } = {}
+
+local function bindShopEntry(itemId: string, apply: (entry: ProgressionLogic.ShopListingEntry, state: any) -> ())
+	table.insert(shopEntryBindings, { ItemId = itemId, Apply = apply })
+end
+
 local currentState: any = {
 	Cash = 0,
 	Gems = 0,
@@ -728,6 +736,12 @@ local function refreshShopLabels()
 	for _, entry in ProgressionLogic.GetShopListing(currentState) do
 		byId[entry.Id] = entry
 	end
+	for _, b in shopEntryBindings do
+		local entry = byId[b.ItemId]
+		if entry then
+			b.Apply(entry, currentState)
+		end
+	end
 	for _, b in shopLabelBindings do
 		local entry = byId[b.ItemId]
 		if entry then
@@ -837,7 +851,7 @@ UiKit.CreateBevelButton({
 -- Build Modular HUD Windows (Tabbed Upgrades, Rewards + Quests, Unified Left-Side Robux Shop)
 local upgradesWin = UpgradesWindow.Build(screenGui, {
 	ModalScrim = modalScrim,
-	BindShopLabel = bindShopLabel,
+	BindShopEntry = bindShopEntry,
 	BuyShopItem = buyShopItem,
 })
 

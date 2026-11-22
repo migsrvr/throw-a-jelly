@@ -381,6 +381,20 @@ function UiKit.ApplyTri(target: Instance, t: Tri): UIGradient
 	return UiKit.AddGradient(target, t.Light, t.Mid, t.Dark)
 end
 
+-- Re-tint an existing tone gradient (or add one). Used for state changes (button grey/green, banners).
+function UiKit.SetTone(target: Instance, t: Tri)
+	local g = target:FindFirstChild("ToneGradient")
+	if g and g:IsA("UIGradient") then
+		g.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, t.Light),
+			ColorSequenceKeypoint.new(0.55, t.Mid),
+			ColorSequenceKeypoint.new(1, t.Dark),
+		})
+	else
+		UiKit.ApplyTri(target, t)
+	end
+end
+
 -- Text outline A: black Contextual stroke, thickness from the text size (or an explicit override)
 function UiKit.AddTextStroke(label: GuiObject, thickness: number?): UIStroke
 	local size = if label:IsA("TextLabel") or label:IsA("TextButton") then label.TextSize else 24
@@ -586,6 +600,18 @@ function UiKit.CreateGradientButton(opts: GradientButtonOpts): (TextButton, Fram
 		btn.Activated:Connect(opts.OnClick)
 	end
 	return btn, face, label
+end
+
+-- Re-tint a CreateGradientButton (face gradient + lip) and set how see-through it is.
+function UiKit.SetButtonTone(btn: TextButton, t: Tri, transparency: number?)
+	local alpha = transparency or 0
+	btn.BackgroundColor3 = lipColor(t)
+	btn.BackgroundTransparency = alpha
+	local face = btn:FindFirstChild("Face")
+	if face and face:IsA("Frame") then
+		UiKit.SetTone(face, t)
+		face.BackgroundTransparency = alpha
+	end
 end
 
 export type WindowOpts = {

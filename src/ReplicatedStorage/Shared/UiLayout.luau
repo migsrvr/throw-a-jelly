@@ -56,6 +56,20 @@ function UiLayout.CounterDuration(oldValue: number, newValue: number): number
 	return 0.4
 end
 
+-- Shop button state (spec section 8): Owned / Maxed / Claimed rows are "locked" (grey, "Permanent"),
+-- an option the player cannot pay for is "unaffordable" (0.4 transparency, "Need N more"), else "available".
+export type ButtonState = "available" | "unaffordable" | "locked"
+
+function UiLayout.ShopButtonState(entryState: string, canAfford: boolean): ButtonState
+	if entryState == "Owned" or entryState == "Maxed" or entryState == "Claimed" then
+		return "locked"
+	end
+	if not canAfford then
+		return "unaffordable"
+	end
+	return "available"
+end
+
 -- Number of slots the hotbar always shows, so the bar does not jump.
 UiLayout.HotbarSlots = 5
 
