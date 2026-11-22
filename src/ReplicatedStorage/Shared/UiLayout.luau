@@ -70,6 +70,42 @@ function UiLayout.ShopButtonState(entryState: string, canAfford: boolean): Butto
 	return "available"
 end
 
+-- Chance of one slime inside its zone, as a whole-number percent (spec 3d detail card).
+function UiLayout.ChancePercent(weight: number, totalWeight: number): number
+	if totalWeight <= 0 then
+		return 0
+	end
+	return math.floor(weight / totalWeight * 100 + 0.5)
+end
+
+-- Backpack sort (spec 3e): Income and Rarity high to low, Newest = last added first.
+-- `items` are { Income, Rank, Index } (Index = position in the unplaced list). Returns the sorted order as indexes.
+export type SortItem = { Income: number, Rank: number, Index: number }
+
+function UiLayout.SortedIndexes(items: { SortItem }, mode: string): { number }
+	local copy = table.clone(items)
+	table.sort(copy, function(a: SortItem, b: SortItem)
+		if mode == "Rarity" then
+			if a.Rank ~= b.Rank then
+				return a.Rank > b.Rank
+			end
+			if a.Income ~= b.Income then
+				return a.Income > b.Income
+			end
+		elseif mode == "Income" then
+			if a.Income ~= b.Income then
+				return a.Income > b.Income
+			end
+		end
+		return a.Index > b.Index
+	end)
+	local out = {}
+	for _, it in copy do
+		table.insert(out, it.Index)
+	end
+	return out
+end
+
 -- Number of slots the hotbar always shows, so the bar does not jump.
 UiLayout.HotbarSlots = 5
 

@@ -32,6 +32,8 @@ local UiLayout = require(Shared:WaitForChild("UiLayout"))
 
 local HudWindows = script.Parent:WaitForChild("HudWindows")
 local UpgradesWindow = require(HudWindows:WaitForChild("UpgradesWindow"))
+local IndexWindow = require(HudWindows:WaitForChild("IndexWindow"))
+local SlimesWindow = require(HudWindows:WaitForChild("SlimesWindow"))
 local RewardsWindow = require(HudWindows:WaitForChild("RewardsWindow"))
 local RobuxStoreWindow = require(HudWindows:WaitForChild("RobuxStoreWindow"))
 
@@ -652,82 +654,6 @@ for i = 1, UiLayout.HotbarSlots do
 end
 
 -- ============================================================================
--- 5. SLIME INDEX MODAL ("Index" button — Clip 2 00:16–00:20)
--- ============================================================================
-local indexModal = Instance.new("Frame")
-indexModal.Name = "SlimeIndexModal"
-indexModal.AnchorPoint = Vector2.new(0.5, 0.5)
-indexModal.Position = UDim2.fromScale(0.5, 0.5)
-indexModal.Size = UDim2.fromOffset(660, 425)
-indexModal.BackgroundColor3 = Color3.fromRGB(34, 38, 46)
-indexModal.Visible = false
-indexModal.ZIndex = 10
-indexModal.Parent = screenGui
-addCorner(indexModal, 14)
-addStroke(indexModal, Color3.fromRGB(15, 18, 24), 3.2, Enum.ApplyStrokeMode.Border)
-
-local indexHeader = Instance.new("Frame")
-indexHeader.Size = UDim2.new(1, 0, 0, 54)
-indexHeader.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-indexHeader.Parent = indexModal
-addCorner(indexHeader, 14)
-UiKit.AddGlossGradient(indexHeader, Color3.fromRGB(175, 70, 245))
-addStroke(indexHeader, Color3.fromRGB(20, 12, 32), 2.2, Enum.ApplyStrokeMode.Border)
-
-local indexTitle = Instance.new("TextLabel")
-indexTitle.Position = UDim2.fromOffset(18, 6)
-indexTitle.Size = UDim2.fromOffset(220, 40)
-indexTitle.BackgroundTransparency = 1
-indexTitle.Font = Enum.Font.FredokaOne
-indexTitle.TextSize = 28
-indexTitle.TextXAlignment = Enum.TextXAlignment.Left
-indexTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-indexTitle.Text = "Slime Index"
-indexTitle.Parent = indexHeader
-addStroke(indexTitle, Color3.fromRGB(20, 10, 30), 2.5)
-
-UiKit.CreateBevelButton({
-	Name = "CloseBtn",
-	Parent = indexHeader,
-	AnchorPoint = Vector2.new(1, 0.5),
-	Position = UDim2.new(1, -10, 0.5, 1),
-	Size = UDim2.fromOffset(40, 40),
-	Color = Color3.fromRGB(235, 55, 65),
-	CornerRadius = 9,
-	Text = "X",
-	TextSize = 22,
-	OnClick = function()
-		UiKit.ToggleModalAnimated(indexModal, modalScrim, false)
-	end,
-})
-
-local indexScroll = Instance.new("ScrollingFrame")
-indexScroll.Position = UDim2.fromOffset(14, 64)
-indexScroll.Size = UDim2.new(1, -28, 1, -106)
-indexScroll.BackgroundTransparency = 1
-indexScroll.BorderSizePixel = 0
-indexScroll.ScrollBarThickness = 6
-indexScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-indexScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-indexScroll.Parent = indexModal
-
-local indexListLayout = Instance.new("UIListLayout")
-indexListLayout.Padding = UDim.new(0, 12)
-indexListLayout.Parent = indexScroll
-
-local indexFooterLabel = Instance.new("TextLabel")
-indexFooterLabel.AnchorPoint = Vector2.new(0.5, 1)
-indexFooterLabel.Position = UDim2.new(0.5, 0, 1, -8)
-indexFooterLabel.Size = UDim2.fromOffset(260, 28)
-indexFooterLabel.BackgroundTransparency = 1
-indexFooterLabel.Font = Enum.Font.FredokaOne
-indexFooterLabel.TextSize = 22
-indexFooterLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-indexFooterLabel.Text = "📘 Unlocked: 1/15"
-indexFooterLabel.Parent = indexModal
-addStroke(indexFooterLabel, Color3.fromRGB(15, 18, 25), 2.2)
-
--- ============================================================================
 -- 6. SHOP LABEL REFRESH (used by UpgradesWindow & RobuxStoreWindow)
 -- ============================================================================
 -- Fill every bound shop label from the shared listing (computed locally from synced state)
@@ -766,88 +692,6 @@ local function refreshShopLabels()
 	end
 end
 
--- ============================================================================
--- 7. SLIMES BACKPACK MODAL ("Slimes" button on Right)
--- ============================================================================
-local slimesModal = Instance.new("Frame")
-slimesModal.Name = "SlimesModal"
-slimesModal.AnchorPoint = Vector2.new(0.5, 0.5)
-slimesModal.Position = UDim2.fromScale(0.5, 0.5)
-slimesModal.Size = UDim2.fromOffset(530, 380)
-slimesModal.BackgroundColor3 = Color3.fromRGB(34, 38, 46)
-slimesModal.Visible = false
-slimesModal.ZIndex = 10
-slimesModal.Parent = screenGui
-addCorner(slimesModal, 14)
-addStroke(slimesModal, Color3.fromRGB(15, 18, 24), 3.2, Enum.ApplyStrokeMode.Border)
-
-local slimesHeader = Instance.new("Frame")
-slimesHeader.Size = UDim2.new(1, 0, 0, 52)
-slimesHeader.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-slimesHeader.Parent = slimesModal
-addCorner(slimesHeader, 14)
-UiKit.AddGlossGradient(slimesHeader, Color3.fromRGB(225, 130, 35))
-addStroke(slimesHeader, Color3.fromRGB(25, 15, 10), 2.2, Enum.ApplyStrokeMode.Border)
-
-local slimesTitle = Instance.new("TextLabel")
-slimesTitle.Position = UDim2.fromOffset(18, 5)
-slimesTitle.Size = UDim2.fromOffset(320, 40)
-slimesTitle.BackgroundTransparency = 1
-slimesTitle.Font = Enum.Font.FredokaOne
-slimesTitle.TextSize = 25
-slimesTitle.TextXAlignment = Enum.TextXAlignment.Left
-slimesTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-slimesTitle.Text = "My Slimes Backpack"
-slimesTitle.Parent = slimesHeader
-addStroke(slimesTitle, Color3.fromRGB(25, 15, 10), 2.2)
-
-UiKit.CreateBevelButton({
-	Name = "CloseBtn",
-	Parent = slimesHeader,
-	AnchorPoint = Vector2.new(1, 0.5),
-	Position = UDim2.new(1, -10, 0.5, 1),
-	Size = UDim2.fromOffset(38, 38),
-	Color = Color3.fromRGB(235, 55, 65),
-	CornerRadius = 9,
-	Text = "X",
-	TextSize = 20,
-	OnClick = function()
-		UiKit.ToggleModalAnimated(slimesModal, modalScrim, false)
-	end,
-})
-
-local slimesScroll = Instance.new("ScrollingFrame")
-slimesScroll.Position = UDim2.fromOffset(14, 60)
-slimesScroll.Size = UDim2.new(1, -28, 1, -120)
-slimesScroll.BackgroundTransparency = 1
-slimesScroll.BorderSizePixel = 0
-slimesScroll.ScrollBarThickness = 6
-slimesScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-slimesScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-slimesScroll.Parent = slimesModal
-
-local slimesListLayout = Instance.new("UIListLayout")
-slimesListLayout.Padding = UDim.new(0, 8)
-slimesListLayout.Parent = slimesScroll
-
-UiKit.CreateBevelButton({
-	Name = "AutoPlaceBestBtn",
-	Parent = slimesModal,
-	AnchorPoint = Vector2.new(0.5, 1),
-	Position = UDim2.new(0.5, 0, 1, -10),
-	Size = UDim2.fromOffset(300, 42),
-	Color = Color3.fromRGB(75, 215, 95),
-	CornerRadius = 10,
-	Text = "✨ Auto-Place Best Slimes on Plot",
-	TextSize = 18,
-	OnClick = function()
-		requestPlaceBest:FireServer()
-		selectedHotbarUid = nil
-		CharacterAnimator.StopCarrySlime()
-		quickPlaceBtn.Visible = false
-	end,
-})
-
 -- Build Modular HUD Windows (Tabbed Upgrades, Rewards + Quests, Unified Left-Side Robux Shop)
 local upgradesWin = UpgradesWindow.Build(screenGui, {
 	ModalScrim = modalScrim,
@@ -865,6 +709,27 @@ local rewardsWin = RewardsWindow.Build(screenGui, {
 	end,
 })
 
+local indexWin = IndexWindow.Build(screenGui, {
+	ModalScrim = modalScrim,
+	OnEquipTrail = function(zoneIndex: number)
+		requestEquipTrail:FireServer({ ZoneIndex = zoneIndex })
+	end,
+})
+
+local slimesWin = SlimesWindow.Build(screenGui, {
+	ModalScrim = modalScrim,
+	GetFreeSlot = findFirstFreePlotSlot,
+	OnPlace = function(uid: string, slot: number)
+		requestPlaceOnSlot:FireServer({ SlimeUid = uid, SlotIndex = slot })
+	end,
+	OnAutoPlace = function()
+		requestPlaceBest:FireServer()
+		selectedHotbarUid = nil
+		CharacterAnimator.StopCarrySlime()
+		quickPlaceBtn.Visible = false
+	end,
+})
+
 local robuxWin = RobuxStoreWindow.Build(screenGui, {
 	ModalScrim = modalScrim,
 	OnToast = showToast,
@@ -873,11 +738,11 @@ local robuxWin = RobuxStoreWindow.Build(screenGui, {
 })
 
 local allModals: { Frame } = {
-	indexModal,
+	indexWin.Frame,
 	robuxWin.Frame,
 	upgradesWin.Frame,
 	rewardsWin.Frame,
-	slimesModal,
+	slimesWin.Frame,
 }
 
 local function toggleExclusiveModal(target: Frame)
@@ -892,7 +757,7 @@ end
 
 -- Left Column (3 buttons, top to bottom): Index, Shop, Upgrades
 createNavButton(leftNav, "IndexNavBtn", "index", "Index", "indexnav", 1, function()
-	toggleExclusiveModal(indexModal)
+	toggleExclusiveModal(indexWin.Frame)
 end)
 
 createNavButton(leftNav, "ShopNavBtn", "shop", "Shop", "shopnav", 2, function()
@@ -932,7 +797,7 @@ badgeText.ZIndex = 9
 badgeText.Parent = rewardsBadge
 
 createNavButton(rightNav, "SlimesNavBtn", "slimes", "Slimes", "slimesnav", 2, function()
-	toggleExclusiveModal(slimesModal)
+	toggleExclusiveModal(slimesWin.Frame)
 end, true)
 
 
@@ -1032,210 +897,6 @@ UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: 
 	end
 end)
 
-local function rebuildSlimeIndexModal()
-	for _, child in indexScroll:GetChildren() do
-		if child:IsA("Frame") then
-			child:Destroy()
-		end
-	end
-
-	local discovered = currentState.DiscoveredSlimes or {}
-	local totalUnlocked = 0
-	for _ in discovered do
-		totalUnlocked += 1
-	end
-	indexFooterLabel.Text = `📘 Unlocked: {totalUnlocked}/{#GameConfig.Slimes}`
-
-	for _, zone in GameConfig.Zones do
-		local pool = GameConfig.SlimesByZone[zone.Index] or {}
-		local zoneUnlocked = 0
-		for _, s in pool do
-			if discovered[s.Id] then
-				zoneUnlocked += 1
-			end
-		end
-		local pct = if #pool > 0 then math.floor((zoneUnlocked / #pool) * 100 + 0.5) else 0
-		local isComplete = (#pool > 0 and zoneUnlocked >= #pool)
-
-		local row = Instance.new("Frame")
-		row.Size = UDim2.new(1, -10, 0, 134)
-		row.BackgroundColor3 = Color3.fromRGB(26, 30, 38)
-		row.Parent = indexScroll
-		addCorner(row, 12)
-		addStroke(row, Color3.fromRGB(18, 20, 26), 2.2, Enum.ApplyStrokeMode.Border)
-
-		-- Left Zone Card
-		local zCard = Instance.new("Frame")
-		zCard.Position = UDim2.fromOffset(10, 10)
-		zCard.Size = UDim2.fromOffset(112, 114)
-		zCard.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-		zCard.Parent = row
-		addCorner(zCard, 10)
-		UiKit.AddGlossGradient(zCard, SlimeFactory.ToColor3(zone.ThemeColor):Lerp(Color3.fromRGB(30, 35, 45), 0.35))
-		addStroke(zCard, Color3.fromRGB(15, 18, 25), 2.2, Enum.ApplyStrokeMode.Border)
-
-		local zTitle = Instance.new("TextLabel")
-		zTitle.Position = UDim2.fromOffset(4, 6)
-		zTitle.Size = UDim2.new(1, -8, 0, 24)
-		zTitle.BackgroundTransparency = 1
-		zTitle.Font = Enum.Font.FredokaOne
-		zTitle.TextScaled = true
-		zTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-		zTitle.Text = zone.Name
-		zTitle.Parent = zCard
-		addStroke(zTitle, Color3.fromRGB(15, 18, 25), 1.8)
-
-		local zEmoji = Instance.new("TextLabel")
-		zEmoji.Position = UDim2.fromOffset(0, 34)
-		zEmoji.Size = UDim2.new(1, 0, 0, 42)
-		zEmoji.BackgroundTransparency = 1
-		zEmoji.Font = Enum.Font.FredokaOne
-		zEmoji.TextSize = 34
-		zEmoji.Text = zone.Emoji
-		zEmoji.Parent = zCard
-
-		local zPct = Instance.new("TextLabel")
-		zPct.Position = UDim2.fromOffset(0, 80)
-		zPct.Size = UDim2.new(1, 0, 0, 26)
-		zPct.BackgroundTransparency = 1
-		zPct.Font = Enum.Font.FredokaOne
-		zPct.TextSize = 20
-		zPct.TextColor3 = Color3.fromRGB(255, 255, 255)
-		zPct.Text = `({pct}%)`
-		zPct.Parent = zCard
-		addStroke(zPct, Color3.fromRGB(15, 18, 25), 1.8)
-
-		-- Center Slime Cards with live 3D ViewportFrame (or 3D Dark Silhouette when locked!)
-		for idx, sDef in pool do
-			local isDiscovered = (discovered[sDef.Id] == true)
-			local sCard = Instance.new("Frame")
-			sCard.Position = UDim2.fromOffset(132 + (idx - 1) * 112, 10)
-			sCard.Size = UDim2.fromOffset(104, 82)
-			sCard.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-			sCard.Parent = row
-			addCorner(sCard, 9)
-			UiKit.AddGlossGradient(sCard, SlimeFactory.GetRarityColor(sDef.Rarity))
-			addStroke(sCard, Color3.fromRGB(15, 18, 25), 2, Enum.ApplyStrokeMode.Border)
-
-			local vpHolder = Instance.new("Frame")
-			vpHolder.AnchorPoint = Vector2.new(0.5, 0.5)
-			vpHolder.Position = UDim2.fromScale(0.5, 0.45)
-			vpHolder.Size = UDim2.fromOffset(56, 52)
-			vpHolder.BackgroundTransparency = 1
-			vpHolder.Parent = sCard
-			UiKit.CreateSlimeViewport(vpHolder, sDef.Id, "NORMAL", not isDiscovered)
-
-			local sName = Instance.new("TextLabel")
-			sName.Position = UDim2.fromOffset(4, 2)
-			sName.Size = UDim2.new(1, -8, 0, 20)
-			sName.BackgroundTransparency = 1
-			sName.Font = Enum.Font.FredokaOne
-			sName.TextScaled = true
-			sName.TextColor3 = Color3.fromRGB(255, 255, 255)
-			sName.Text = if isDiscovered then sDef.ShortWord else "???"
-			sName.ZIndex = 3
-			sName.Parent = sCard
-			addStroke(sName, Color3.fromRGB(15, 18, 25), 1.6)
-
-			local sRarity = Instance.new("TextLabel")
-			sRarity.Position = UDim2.fromOffset(4, 58)
-			sRarity.Size = UDim2.new(1, -8, 0, 20)
-			sRarity.BackgroundTransparency = 1
-			sRarity.Font = Enum.Font.FredokaOne
-			sRarity.TextSize = 14
-			sRarity.TextColor3 = Color3.fromRGB(255, 255, 255)
-			sRarity.Text = sDef.Rarity
-			sRarity.ZIndex = 3
-			sRarity.Parent = sCard
-			addStroke(sRarity, Color3.fromRGB(15, 18, 25), 1.5)
-		end
-
-		local progBg = Instance.new("Frame")
-		progBg.Position = UDim2.fromOffset(132, 98)
-		progBg.Size = UDim2.fromOffset(328, 22)
-		progBg.BackgroundColor3 = Color3.fromRGB(16, 18, 24)
-		progBg.Parent = row
-		addCorner(progBg, 8)
-		addStroke(progBg, Color3.fromRGB(12, 14, 18), 1.6, Enum.ApplyStrokeMode.Border)
-
-		local progFill = Instance.new("Frame")
-		progFill.Size = UDim2.fromScale(if #pool > 0 then zoneUnlocked / #pool else 0, 1)
-		progFill.BackgroundColor3 = Color3.fromRGB(95, 245, 75)
-		progFill.Parent = progBg
-		addCorner(progFill, 8)
-
-		local progTxt = Instance.new("TextLabel")
-		progTxt.Size = UDim2.fromScale(1, 1)
-		progTxt.BackgroundTransparency = 1
-		progTxt.Font = Enum.Font.FredokaOne
-		progTxt.TextSize = 15
-		progTxt.TextColor3 = Color3.fromRGB(255, 255, 255)
-		progTxt.Text = `{zoneUnlocked}/{#pool}`
-		progTxt.Parent = progBg
-		addStroke(progTxt, Color3.fromRGB(15, 18, 25), 1.5)
-
-		-- Right Zone Trail Bonus Panel
-		local trailLbl = Instance.new("TextLabel")
-		trailLbl.Position = UDim2.fromOffset(472, 12)
-		trailLbl.Size = UDim2.fromOffset(132, 52)
-		trailLbl.BackgroundTransparency = 1
-		trailLbl.Font = Enum.Font.FredokaOne
-		trailLbl.TextSize = 16
-		trailLbl.TextColor3 = Color3.fromRGB(120, 255, 135)
-		trailLbl.Text = `{zone.TrailName}\n{zone.TrailBonusText}`
-		trailLbl.Parent = row
-		addStroke(trailLbl, Color3.fromRGB(15, 18, 25), 1.6)
-
-		local isEquippedTrail = (currentState.EquippedTrailZone == zone.Index)
-		UiKit.CreateBevelButton({
-			Name = "TrailEquipBtn",
-			Parent = row,
-			Position = UDim2.fromOffset(478, 76),
-			Size = UDim2.fromOffset(122, 40),
-			Color = if isEquippedTrail
-				then Color3.fromRGB(65, 185, 245)
-				elseif isComplete then Color3.fromRGB(85, 235, 95)
-				else Color3.fromRGB(70, 75, 88),
-			CornerRadius = 9,
-			Text = if isEquippedTrail then "EQUIPPED" elseif isComplete then "EQUIP" else "LOCKED",
-			TextSize = 18,
-			OnClick = function()
-				requestEquipTrail:FireServer({ ZoneIndex = zone.Index })
-			end,
-		})
-	end
-end
-
-local function rebuildBackpackModal()
-	for _, child in slimesScroll:GetChildren() do
-		if child:IsA("TextButton") then
-			child:Destroy()
-		end
-	end
-
-	local unplaced = currentState.UnplacedSlimes or {}
-	for _, inst in unplaced do
-		local def = GameConfig.SlimesById[inst.SlimeId] or GameConfig.Slimes[1]
-		local mutTag = if inst.Mutation ~= "NORMAL" then `[{inst.Mutation}] ` else ""
-		UiKit.CreateBevelButton({
-			Name = `SlimeRow_{inst.Uid}`,
-			Parent = slimesScroll,
-			Size = UDim2.new(1, -10, 0, 44),
-			Color = SlimeFactory.GetRarityColor(def.Rarity):Lerp(Color3.fromRGB(38, 44, 58), 0.55),
-			CornerRadius = 9,
-			Text = `🟢 {mutTag}{inst.Name} — +${GameConfig.FormatNumber(inst.IncomePerSec)}/s  (Click to Place)`,
-			TextSize = 16,
-			OnClick = function()
-				local freeSlot = findFirstFreePlotSlot() or 1
-				requestPlaceOnSlot:FireServer({
-					SlimeUid = inst.Uid,
-					SlotIndex = freeSlot,
-				})
-			end,
-		})
-	end
-end
-
 local function refreshAllUi()
 	setCounter(powerCounter, currentState.EffectiveThrowPower or 5)
 	setCounter(cashCounter, currentState.Cash or 0)
@@ -1247,8 +908,8 @@ local function refreshAllUi()
 	robuxWin.Refresh(currentState)
 
 	rebuildHotbar()
-	rebuildSlimeIndexModal()
-	rebuildBackpackModal()
+	indexWin.Refresh(currentState)
+	slimesWin.Refresh(currentState)
 end
 
 stateSync.OnClientEvent:Connect(function(newState: any)

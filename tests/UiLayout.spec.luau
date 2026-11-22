@@ -84,4 +84,27 @@ return function(t: any)
 			expect(UiLayout.ShopButtonState("Available", true)).toBe("available")
 		end)
 	end)
+
+	describe("UiLayout - index chance and backpack sort", function()
+		it("chance is the weight share rounded to a percent", function()
+			expect(UiLayout.ChancePercent(65, 100)).toBe(65)
+			expect(UiLayout.ChancePercent(1, 3)).toBe(33)
+			expect(UiLayout.ChancePercent(5, 0)).toBe(0)
+		end)
+		local items = {
+			{ Income = 5, Rank = 1, Index = 1 },
+			{ Income = 50, Rank = 2, Index = 2 },
+			{ Income = 20, Rank = 3, Index = 3 },
+		}
+		it("sorts by income, rarity and newest", function()
+			local byIncome = UiLayout.SortedIndexes(items, "Income")
+			expect(byIncome[1]).toBe(2)
+			expect(byIncome[3]).toBe(1)
+			local byRarity = UiLayout.SortedIndexes(items, "Rarity")
+			expect(byRarity[1]).toBe(3)
+			local newest = UiLayout.SortedIndexes(items, "Newest")
+			expect(newest[1]).toBe(3)
+			expect(newest[3]).toBe(1)
+		end)
+	end)
 end
