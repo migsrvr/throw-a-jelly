@@ -52,7 +52,9 @@ function GiftPicker.Build(parent: Instance, ctx: GiftPickerContext): GiftPickerH
 	local frame = win.Frame
 	frame.ZIndex = 30
 	win.Close.Activated:Connect(function()
-		UiKit.ToggleModalAnimated(frame, ctx.ModalScrim, false)
+		local shopModal = parent:FindFirstChild("RobuxStoreModal")
+		local keepScrim = shopModal ~= nil and shopModal:IsA("GuiObject") and shopModal.Visible
+		UiKit.ToggleModalAnimated(frame, if keepScrim then nil else ctx.ModalScrim, false)
 	end)
 	local giftIcon = UiKit.CreateIconPlate(win.Header, "rewards", 48)
 	giftIcon.AnchorPoint = Vector2.new(1, 0.5)
@@ -62,11 +64,17 @@ function GiftPicker.Build(parent: Instance, ctx: GiftPickerContext): GiftPickerH
 	local body = win.Body
 	local selected: GiftItem? = ctx.Items[1]
 
-	-- Item chips
-	local chipRow = Instance.new("Frame")
+	-- Item chips (horizontal scrolling so 4-8 giftable items never overflow the 600px modal)
+	local chipRow = Instance.new("ScrollingFrame")
 	chipRow.Position = UDim2.fromOffset(20, 12)
-	chipRow.Size = UDim2.new(1, -40, 0, 40)
+	chipRow.Size = UDim2.new(1, -40, 0, 44)
 	chipRow.BackgroundTransparency = 1
+	chipRow.BorderSizePixel = 0
+	chipRow.ClipsDescendants = true
+	chipRow.ScrollingDirection = Enum.ScrollingDirection.X
+	chipRow.AutomaticCanvasSize = Enum.AutomaticSize.X
+	chipRow.CanvasSize = UDim2.new()
+	chipRow.ScrollBarThickness = 3
 	chipRow.Parent = body
 	local chipLayout = Instance.new("UIListLayout")
 	chipLayout.FillDirection = Enum.FillDirection.Horizontal

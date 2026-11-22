@@ -34,6 +34,7 @@ local warnedDisabled = false
 
 -- Players whose save was read successfully this session. Only these are ever written back.
 local canSave: { [Player]: boolean } = {}
+local saving: { [Player]: boolean } = {}
 -- Saves currently running (leave-saves included), so shutdown can wait for all of them
 local inFlight = 0
 
@@ -116,6 +117,13 @@ function DataService.Save(player: Player, profile: ProgressionLogic.PlayerProfil
 	if not ds then
 		return false
 	end
+	while saving[player] do
+		task.wait(0.05)
+	end
+	if not canSave[player] then
+		return false
+	end
+	saving[player] = true
 	profile.LastSeen = os.time()
 	local data = ProfileSerializer.Serialize(profile)
 	inFlight += 1
@@ -125,6 +133,7 @@ function DataService.Save(player: Player, profile: ProgressionLogic.PlayerProfil
 		end)
 	end)
 	inFlight -= 1
+	saving[player] = nil
 	if not ok then
 		warn(`[DataService] Save failed for {player.Name}: {tostring(err)}`)
 	end

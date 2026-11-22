@@ -79,16 +79,27 @@ function UiKit.AttachResponsiveScale(screenGui: ScreenGui): UIScale
 	end
 
 	updateScale()
-	local cam = workspace.CurrentCamera
-	if cam then
-		cam:GetPropertyChangedSignal("ViewportSize"):Connect(updateScale)
-	end
-	workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
-		local newCam = workspace.CurrentCamera
-		if newCam then
-			updateScale()
-			newCam:GetPropertyChangedSignal("ViewportSize"):Connect(updateScale)
+	local camConn: RBXScriptConnection? = nil
+	local function bindCamera(cam: Camera?)
+		if camConn then
+			camConn:Disconnect()
+			camConn = nil
 		end
+		if cam then
+			updateScale()
+			camConn = cam:GetPropertyChangedSignal("ViewportSize"):Connect(updateScale)
+		end
+	end
+	bindCamera(workspace.CurrentCamera)
+	local worldCamConn = workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+		bindCamera(workspace.CurrentCamera)
+	end)
+	screenGui.Destroying:Connect(function()
+		if camConn then
+			camConn:Disconnect()
+			camConn = nil
+		end
+		worldCamConn:Disconnect()
 	end)
 
 	return uiScale

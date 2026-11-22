@@ -32,7 +32,8 @@ return function(t: any)
 		p.TrainingXP = 31
 		p.MaxSlimes = GameConfig.Slots.ExpandedMaxSlimes
 		p.BestDistance = 512.25
-		p.OwnedBoosts.double_cash = true
+		p.OwnedBoosts.money_2x = true
+		p.OwnedBoosts.gems_4x = true
 		p.OwnedBoosts.auto_throw = true
 		p.ClaimedFreeGift = true
 		p.TotalThrows = 9
@@ -96,7 +97,8 @@ return function(t: any)
 			expect(#loaded.ProcessedReceipts).toBe(2)
 			expect(loaded.ProcessedReceipts[1]).toBe("rcpt_101")
 			expect(loaded.OwnedPasses.pass_vip == nil).toBe(true) -- passes are checked live from Roblox, not saved
-			expect(loaded.OwnedBoosts.double_cash).toBe(true)
+			expect(loaded.OwnedBoosts.money_2x).toBe(true)
+			expect(loaded.OwnedBoosts.gems_4x).toBe(true)
 			expect(loaded.OwnedBoosts.auto_throw).toBe(true)
 			for id in p.DiscoveredSlimes do
 				expect(loaded.DiscoveredSlimes[id]).toBe(true)
@@ -185,7 +187,7 @@ return function(t: any)
 			})
 			expect(p.PlacedSlimesBySlot[2] == nil).toBe(true)
 			expect(#p.OwnedSlimes).toBe(1)
-			expect(p.OwnedBoosts.double_cash).toBe(true)
+			expect(p.OwnedBoosts.money_2x).toBe(true) -- legacy double_cash migrates cleanly to money_2x
 			expect((p.OwnedBoosts :: any).removed_boost == nil).toBe(true)
 			expect((p.DiscoveredSlimes :: any).deleted_slime == nil).toBe(true)
 			expect(p.EquippedSlimeId).toBe("meadow_sprout")

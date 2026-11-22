@@ -272,7 +272,8 @@ local ACTION_TEXT: { [string]: string } = {
 	PowerUpgrade = "Raises Throw Power by one upgrade level (price grows each level)",
 	PullUpTier = "Upgrades the pull-up bar to the next tier",
 	BaitTier = "Upgrades the Jelly Bait to the next quality tier (more luck)",
-	SlotExpansion = "Adds 4 more slime slots to the plot (8 to 12); the Cash and Gem versions unlock the same slots",
+	SlotExpansion = "Unlocks locked Plot Slots 9-12 one-by-one with Gems (or all 4 via +4 Plot Slots Pass)",
+	MultiplierTier = "Upgrades a permanent multiplier track (2x -> 4x -> 6x -> 8x -> 10x) with Gems or Robux Pass",
 	Boost = "Permanent boost (see boosts below)",
 	Egg = "Hatches 1 or 3 slimes with the odds listed below",
 	FreeGift = "One-time free slime",
@@ -325,15 +326,15 @@ add()
 -- Plot ------------------------------------------------------------------------
 add("## Plot slots")
 add()
-add(`Every plot starts with {GameConfig.Slots.InitialMaxSlimes} slime slots; a one-time purchase of ${num(GameConfig.Slots.ExpansionCost)} (or {num(GameConfig.Slots.ExpansionGemCost)} Gems) unlocks all {GameConfig.Slots.ExpandedMaxSlimes}.`)
+local slotCosts = GameConfig.Slots.SlotUnlockGemCosts
+add(`Every plot starts capped at {GameConfig.Slots.InitialMaxSlimes} slime slots. Slots 9-12 are locked and can only be unlocked 1-by-1 with Gems ({num(slotCosts[9])} / {num(slotCosts[10])} / {num(slotCosts[11])} / {num(slotCosts[12])} Gems) or all 4 at once via the "+4 Plot Slots" Robux Pass.`)
 add()
 
 -- Gems ------------------------------------------------------------------------
 local g = GameConfig.Gems
 add("## Gems (premium currency)")
 add()
-add("Shown as 💎 in the HUD and the shop. Earned slowly by playing; spent in the Gem Shop (see the Gem rows in the shop table).")
-add("Buying Gems with Robux is planned but not built yet.")
+add("Shown as 💎 in the HUD and the shop. Earned slowly by playing (see `docs/docs/ECONOMY-BASELINE.md` for hourly F2P targets and the 8+ hour grind floor); spent in the Gem Upgrades tab or skipped via Robux Passes & Gem Packs.")
 add()
 add("### Index milestones (paid once each)")
 add()
@@ -364,7 +365,7 @@ end
 add()
 add("### Rare catches (throws only, not eggs)")
 add()
-add("A caught slime pays its rarity amount plus its mutation amount. Anything not listed pays 0.")
+add("A caught slime pays its rarity amount plus its mutation amount (multiplied by owned 2x-10x Gems tiers & VIP). Anything not listed pays 0.")
 add()
 header({ "Rarity or mutation", "Gems" })
 for _, r in RARITY_ORDER do
@@ -380,9 +381,8 @@ end
 add()
 add("### Auto-Throw")
 add()
-add(`Once bought, an AUTO toggle appears under the throw meter. While it's on, the player throws by itself after {GameConfig.AutoThrow.IdleDelaySeconds}s at the throw line,`)
-local autoSeg = GameConfig.EvaluateMeterRatio(GameConfig.AutoThrow.MeterRatio)
-add(`always stopping the meter in band {autoSeg.Index} (+{autoSeg.BonusPower} power, {string.format("%.2f", autoSeg.LuckMultiplier)}x luck), so a PERFECT by hand is still better.`)
+add(`Once unlocked (via Gems or the Auto-Throw Robux Pass), an AUTO toggle appears under the visible vertical throw meter.`)
+add(`While ON, the meter smoothly locks onto the next target from a server-shuffled 5-throw bag ({GameConfig.AutoThrow.BagPerfectCount} PERFECT + {GameConfig.AutoThrow.BagGoodCount} GREAT per 5 throws) and fires after {GameConfig.AutoThrow.IdleDelaySeconds}s.`)
 add()
 
 -- Quests ----------------------------------------------------------------------

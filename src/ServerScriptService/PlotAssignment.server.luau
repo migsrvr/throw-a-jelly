@@ -2,12 +2,6 @@
 local Players = game:GetService("Players")
 local Bases = workspace:WaitForChild("Map"):WaitForChild("Hub"):WaitForChild("PlayerBases")
 
-local function setSign(plot, text)
-	local sign = plot:FindFirstChild("OwnerSign")
-	local label = sign and sign:FindFirstChild("SignGui") and sign.SignGui:FindFirstChild("Text")
-	if label then label.Text = text end
-end
-
 local function getPlots()
 	local plots = Bases:GetChildren()
 	table.sort(plots, function(a, b) return (a:GetAttribute("PlotId") or 0) < (b:GetAttribute("PlotId") or 0) end)
@@ -25,7 +19,6 @@ local function assign(player)
 		if owner == nil or owner == "" then
 			plot:SetAttribute("Owner", tostring(player.UserId))
 			player:SetAttribute("PlotId", plot:GetAttribute("PlotId"))
-			setSign(plot, player.DisplayName .. "'s Base")
 			local spawn = spawnOf(plot)
 			if spawn then
 				player.RespawnLocation = spawn
@@ -45,7 +38,6 @@ local function release(player)
 	for _, plot in ipairs(getPlots()) do
 		if plot:GetAttribute("Owner") == tostring(player.UserId) then
 			plot:SetAttribute("Owner", "")
-			setSign(plot, "Empty Plot")
 		end
 	end
 end

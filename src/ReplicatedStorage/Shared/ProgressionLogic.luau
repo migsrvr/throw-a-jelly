@@ -129,7 +129,10 @@ end
 -- Exposed as ProgressionLogic.SyncLegacyArrays so loading a saved profile can rebuild them too.
 local function syncLegacyArrays(profile: PlayerProfile)
 	local placedIds = {}
-	for slot = 1, profile.MaxSlimes do
+	local maxSlots = if profile.OwnedPasses and profile.OwnedPasses.pass_extra_slots == true
+		then GameConfig.Slots.ExpandedMaxSlimes
+		else math.clamp(math.floor(profile.MaxSlimes or GameConfig.Slots.InitialMaxSlimes), GameConfig.Slots.InitialMaxSlimes, GameConfig.Slots.ExpandedMaxSlimes)
+	for slot = 1, maxSlots do
 		local inst = profile.PlacedSlimesBySlot[slot]
 		if inst then
 			table.insert(placedIds, inst.SlimeId)
@@ -212,6 +215,126 @@ local function needText(kind: GameConfig.PriceKind, amount: number): string
 end
 
 -- ============================================================================
+-- MULTIPLIERS & EFFECTIVE CAP (Gems / Training Power / Luck / Money / Slots / Auto)
+-- Highest owned tier across Gem Upgrades (OwnedBoosts) OR Robux Game Passes (OwnedPasses) wins,
+-- capped at 10x max per track so players never pay twice. VIP (+25% Cash & Gems) stacks on top.
+-- ============================================================================
+
+export type MultiplierProfileLike = {
+	OwnedBoosts: { [string]: boolean }?,
+	OwnedPasses: { [string]: boolean }?,
+}
+
+function ProgressionLogic.GetTrackMultiplier(
+	profile: MultiplierProfileLike,
+	trackId: GameConfig.MultiplierTrackId
+): number
+	local track = GameConfig.MultiplierTracksById[trackId]
+	if not track then
+		return 1.0
+	end
+	local owned = profile.OwnedBoosts or {}
+	local passes = profile.OwnedPasses or {}
+	local best = 1.0
+	for _, tier in track.Tiers do
+		if owned[tier.BoostId] == true or passes[tier.PassId] == true then
+			if tier.Multiplier > best then
+				best = tier.Multiplier
+			end
+		end
+	end
+	-- Legacy saved boost aliases
+	if trackId == "money" and owned.double_cash == true then
+		best = math.max(best, 2.0)
+	elseif trackId == "power" and owned.double_power == true then
+		best = math.max(best, 2.0)
+	elseif trackId == "luck" and owned.lucky_charm == true then
+		best = math.max(best, 1.5)
+	end
+	return best
+end
+
+function ProgressionLogic.GetNextMultiplierTier(
+	profile: MultiplierProfileLike,
+	trackId: GameConfig.MultiplierTrackId
+): (GameConfig.MultiplierTierDef?, number)
+	local track = GameConfig.MultiplierTracksById[trackId]
+	if not track then
+		return nil, 1.0
+	end
+	local currentMult = ProgressionLogic.GetTrackMultiplier(profile, trackId)
+	for _, tier in track.Tiers do
+		if tier.Multiplier > currentMult then
+			return tier, currentMult
+		end
+	end
+	return nil, currentMult
+end
+
+function ProgressionLogic.GetGemMultiplier(profile: MultiplierProfileLike): number
+	local base = ProgressionLogic.GetTrackMultiplier(profile, "gems")
+	local passes = profile.OwnedPasses or {}
+	local vip = GameConfig.RobuxPassesById.pass_vip
+	local vipMult = if passes.pass_vip == true and vip and vip.GemMultiplier then vip.GemMultiplier else 1.0
+	return base * vipMult
+end
+
+function ProgressionLogic.GetTrainingPowerMultiplier(profile: MultiplierProfileLike): number
+	return ProgressionLogic.GetTrackMultiplier(profile, "power")
+end
+
+function ProgressionLogic.GetCashMultiplier(profile: MultiplierProfileLike): number
+	local base = ProgressionLogic.GetTrackMultiplier(profile, "money")
+	local passes = profile.OwnedPasses or {}
+	local vip = GameConfig.RobuxPassesById.pass_vip
+	local vipMult = if passes.pass_vip == true and vip and vip.CashMultiplier then vip.CashMultiplier else 1.0
+	return base * vipMult
+end
+
+-- Effective Cash multiplier granted by owned Robux Passes (kept for compatibility with UI/tests).
+function ProgressionLogic.GetPassCashMultiplier(profile: { OwnedPasses: { [string]: boolean }? }): number
+	local passes = profile.OwnedPasses or {}
+	local mult = 1.0
+	local moneyPass = GameConfig.RobuxPassesById.pass_x2_cash
+	if passes.pass_x2_cash == true and moneyPass and moneyPass.CashMultiplier then
+		mult *= moneyPass.CashMultiplier
+	end
+	local vip = GameConfig.RobuxPassesById.pass_vip
+	if passes.pass_vip == true and vip and vip.CashMultiplier then
+		mult *= vip.CashMultiplier
+	end
+	return mult
+end
+
+function ProgressionLogic.GetBoostLuckMultiplier(profile: MultiplierProfileLike): number
+	return ProgressionLogic.GetTrackMultiplier(profile, "luck")
+end
+
+function ProgressionLogic.GetEffectiveMaxSlimes(
+	profile: { MaxSlimes: number?, OwnedPasses: { [string]: boolean }? }
+): number
+	local passes = profile.OwnedPasses or {}
+	if passes.pass_extra_slots == true then
+		return GameConfig.Slots.ExpandedMaxSlimes
+	end
+	local raw = profile.MaxSlimes or GameConfig.Slots.InitialMaxSlimes
+	return math.clamp(math.floor(raw), GameConfig.Slots.InitialMaxSlimes, GameConfig.Slots.ExpandedMaxSlimes)
+end
+
+function ProgressionLogic.OwnsAutoThrow(profile: MultiplierProfileLike): boolean
+	local owned = profile.OwnedBoosts or {}
+	local passes = profile.OwnedPasses or {}
+	return owned.auto_throw == true or passes.pass_auto_throw == true
+end
+
+local function scaleEarnedGems(profile: PlayerProfile, baseGems: number): number
+	if baseGems <= 0 then
+		return 0
+	end
+	return math.max(1, math.floor(baseGems * ProgressionLogic.GetGemMultiplier(profile) + 0.5))
+end
+
+-- ============================================================================
 -- GEMS: earning
 -- ============================================================================
 
@@ -229,15 +352,16 @@ end
 function ProgressionLogic.AwardIndexMilestones(profile: PlayerProfile): number
 	local milestones = GameConfig.Gems.IndexMilestones
 	local discovered = countDiscovered(profile)
-	local paid = 0
+	local basePaid = 0
 	while true do
 		local nextMilestone = milestones[profile.IndexMilestonesClaimed + 1]
 		if not nextMilestone or discovered < nextMilestone.Discovered then
 			break
 		end
 		profile.IndexMilestonesClaimed += 1
-		paid += nextMilestone.Gems
+		basePaid += nextMilestone.Gems
 	end
+	local paid = scaleEarnedGems(profile, basePaid)
 	profile.Gems += paid
 	return paid
 end
@@ -246,16 +370,17 @@ end
 function ProgressionLogic.AwardZoneReach(profile: PlayerProfile, zoneIndex: number): number
 	local rewards = GameConfig.Gems.FirstZoneReach
 	local target = math.clamp(math.floor(zoneIndex), 0, #rewards)
-	local paid = 0
+	local basePaid = 0
 	while profile.HighestZoneReached < target do
 		profile.HighestZoneReached += 1
-		paid += rewards[profile.HighestZoneReached] or 0
+		basePaid += rewards[profile.HighestZoneReached] or 0
 	end
+	local paid = scaleEarnedGems(profile, basePaid)
 	profile.Gems += paid
 	return paid
 end
 
--- Gems for a rare catch from a throw: rarity drop + mutation drop.
+-- Base Gems for a rare catch from a throw (multiplied by GetGemMultiplier when paid).
 function ProgressionLogic.GetCatchGems(slimeDef: GameConfig.SlimeDef, mutationId: string): number
 	local cfg = GameConfig.Gems
 	return (cfg.RarityDrops[slimeDef.Rarity] or 0) + (cfg.MutationDrops[mutationId] or 0)
@@ -304,7 +429,7 @@ function ProgressionLogic.GetDailyStatus(
 	profile: PlayerProfile,
 	dayNumber: number
 ): { CanClaim: boolean, NextStreakDay: number, WillReset: boolean }
-	if profile.LastDailyClaimDay == dayNumber then
+	if profile.LastDailyClaimDay >= dayNumber then
 		return {
 			CanClaim = false,
 			NextStreakDay = math.max(1, profile.DailyStreak),
@@ -329,7 +454,7 @@ end
 -- Returns (claimed, gemsPaid, streakDay). Claiming on the day after the last claim continues the streak;
 -- any longer gap restarts it at day 1.
 function ProgressionLogic.ClaimDailyReward(profile: PlayerProfile, dayNumber: number): (boolean, number, number)
-	if profile.LastDailyClaimDay == dayNumber then
+	if profile.LastDailyClaimDay >= dayNumber then
 		return false, 0, profile.DailyStreak
 	end
 	if profile.LastDailyClaimDay >= 0 and dayNumber == profile.LastDailyClaimDay + 1 then
@@ -339,12 +464,14 @@ function ProgressionLogic.ClaimDailyReward(profile: PlayerProfile, dayNumber: nu
 	end
 	profile.LastDailyClaimDay = dayNumber
 	local rewards = GameConfig.Gems.DailyRewards
-	local gems = rewards[math.min(profile.DailyStreak, #rewards)]
+	local baseGems = rewards[math.min(profile.DailyStreak, #rewards)]
+	local gems = scaleEarnedGems(profile, baseGems)
 	profile.Gems += gems
 	return true, gems, profile.DailyStreak
 end
 
 -- Grants a Robux Gem Pack once per unique PurchaseId, keeping a capped dedupe history on the profile.
+-- Robux Gem Packs are NOT multiplied by in-game Gem multipliers.
 function ProgressionLogic.GrantRobuxGemPack(
 	profile: PlayerProfile,
 	packId: string,
@@ -364,41 +491,6 @@ function ProgressionLogic.GrantRobuxGemPack(
 	end
 	profile.Gems += pack.Gems
 	return true, pack.Gems, `Purchased {pack.Name} (+{GameConfig.FormatNumber(pack.Gems)} Gems)!`
-end
-
--- Product of every owned boost's LuckMultiplier (e.g. Lucky Charm x1.5) and Robux Pass LuckMultiplier.
-function ProgressionLogic.GetBoostLuckMultiplier(
-	profile: { OwnedBoosts: { [string]: boolean }?, OwnedPasses: { [string]: boolean }? }
-): number
-	local mult = 1.0
-	local owned = profile.OwnedBoosts or {}
-	for boostId, has in owned do
-		local boost = GameConfig.ShopBoosts[boostId]
-		if has and boost and boost.LuckMultiplier then
-			mult *= boost.LuckMultiplier
-		end
-	end
-	local passes = profile.OwnedPasses or {}
-	for passId, has in passes do
-		local pass = GameConfig.RobuxPassesById[passId]
-		if has and pass and pass.LuckMultiplier then
-			mult *= pass.LuckMultiplier
-		end
-	end
-	return mult
-end
-
--- Product of every owned Robux Pass CashMultiplier (e.g. x2 Cash pass = 2.0, VIP = 1.1).
-function ProgressionLogic.GetPassCashMultiplier(profile: { OwnedPasses: { [string]: boolean }? }): number
-	local mult = 1.0
-	local passes = profile.OwnedPasses or {}
-	for passId, has in passes do
-		local pass = GameConfig.RobuxPassesById[passId]
-		if has and pass and pass.CashMultiplier then
-			mult *= pass.CashMultiplier
-		end
-	end
-	return mult
 end
 
 local function milestoneSuffix(gems: number): string
@@ -432,7 +524,8 @@ end
 function ProgressionLogic.GetIncomePerSecond(profile: PlayerProfile): number
 	local total = 0
 	local hasPlacedInstances = false
-	for slot = 1, profile.MaxSlimes do
+	local maxSlots = ProgressionLogic.GetEffectiveMaxSlimes(profile)
+	for slot = 1, maxSlots do
 		local inst = profile.PlacedSlimesBySlot[slot]
 		if inst then
 			hasPlacedInstances = true
@@ -442,7 +535,7 @@ function ProgressionLogic.GetIncomePerSecond(profile: PlayerProfile): number
 
 	-- Fallback if legacy test mutated PlacedSlimes directly
 	if not hasPlacedInstances and #profile.PlacedSlimes > 0 then
-		local count = math.min(#profile.PlacedSlimes, profile.MaxSlimes)
+		local count = math.min(#profile.PlacedSlimes, maxSlots)
 		for i = 1, count do
 			local def = GameConfig.SlimesById[profile.PlacedSlimes[i]]
 			if def then
@@ -451,10 +544,9 @@ function ProgressionLogic.GetIncomePerSecond(profile: PlayerProfile): number
 		end
 	end
 
-	local cashBoost = if profile.OwnedBoosts.double_cash then 2.0 else 1.0
-	local passCash = ProgressionLogic.GetPassCashMultiplier(profile)
+	local cashMult = ProgressionLogic.GetCashMultiplier(profile)
 	local trailMult = ProgressionLogic.GetTrailMultiplier(profile, "Cash")
-	return math.floor(total * cashBoost * passCash * trailMult + 0.5)
+	return math.floor(total * cashMult * trailMult + 0.5)
 end
 
 function ProgressionLogic.GetRarestSlimeDef(profile: PlayerProfile): GameConfig.SlimeDef
@@ -468,12 +560,12 @@ function ProgressionLogic.GetRarestSlimeDef(profile: PlayerProfile): GameConfig.
 	return bestDef
 end
 
--- One pull-up rep: adds Training XP (bar tier XPPerRep x x2 boost x trail x repMultiplier), then levels
--- up as many times as the XP covers. Each level up adds GameConfig.Training.PowerPerLevel Throw Power.
+-- One pull-up rep: adds Training XP (bar tier XPPerRep x Training Power tier x trail x repMultiplier),
+-- then levels up as many times as the XP covers. Each level up adds GameConfig.Training.PowerPerLevel Throw Power.
 -- repMultiplier is GameConfig.Training.BonusRepMultiplier for a clicked Bonus Rep.
 function ProgressionLogic.ApplyPullUpRep(profile: PlayerProfile, repMultiplier: number?): PullUpRepResult
 	local tierDef = GameConfig.PullUpTiers[profile.PullUpTier] or GameConfig.PullUpTiers[1]
-	local xpBoost = if profile.OwnedBoosts.double_power then 2.0 else 1.0
+	local xpBoost = ProgressionLogic.GetTrainingPowerMultiplier(profile)
 	local trailMult = ProgressionLogic.GetTrailMultiplier(profile, "XP")
 	local mult = math.max(0, repMultiplier or 1)
 	local xpGained = math.max(1, math.floor(tierDef.XPPerRep * mult * xpBoost * trailMult + 0.5))
@@ -549,23 +641,51 @@ function ProgressionLogic.PurchasePullUpTier(profile: PlayerProfile): (boolean, 
 	return true, `Unlocked {nextTier.Name} (+{nextTier.XPPerRep} XP/rep)!`
 end
 
--- The +4 slot unlock can be paid with Cash (ExpansionCost) or Gems (ExpansionGemCost); either one maxes it.
-function ProgressionLogic.GetSlotExpansionCost(priceKind: GameConfig.PriceKind): number
-	return if priceKind == "Gems" then GameConfig.Slots.ExpansionGemCost else GameConfig.Slots.ExpansionCost
+-- Locked Plot Slots (9..12): strictly unlocked 1-by-1 with Gems OR all 4 at once via "+4 Plot Slots" Robux Pass.
+-- Cash can never unlock extra plot slots.
+function ProgressionLogic.GetSlotExpansionCost(currentMaxSlimes: number?): number?
+	local cur = currentMaxSlimes or GameConfig.Slots.InitialMaxSlimes
+	return GameConfig.GetNextSlotGemCost(cur)
 end
 
 function ProgressionLogic.PurchaseSlotExpansion(profile: PlayerProfile, priceKind: GameConfig.PriceKind?): (boolean, string)
-	if profile.MaxSlimes >= GameConfig.Slots.ExpandedMaxSlimes then
+	if priceKind ~= nil and priceKind ~= "Gems" then
+		return false, "Extra plot slots can only be unlocked with Gems or the +4 Plot Slots Pass!"
+	end
+	local effMax = ProgressionLogic.GetEffectiveMaxSlimes(profile)
+	if effMax >= GameConfig.Slots.ExpandedMaxSlimes then
 		return false, "All 12 Slime Slots are already unlocked!"
 	end
-	local kind: GameConfig.PriceKind = priceKind or "Cash"
-	local cost = ProgressionLogic.GetSlotExpansionCost(kind)
-	if ProgressionLogic.GetBalance(profile, kind) < cost then
-		return false, needText(kind, cost)
+	local cost = GameConfig.GetNextSlotGemCost(effMax)
+	if not cost then
+		return false, "All 12 Slime Slots are already unlocked!"
 	end
-	spend(profile, kind, cost)
-	profile.MaxSlimes = GameConfig.Slots.ExpandedMaxSlimes
-	return true, "Unlocked +4 Slime Slots (12 Total)!"
+	if profile.Gems < cost then
+		return false, needText("Gems", cost)
+	end
+	profile.Gems -= cost
+	profile.MaxSlimes = effMax + 1
+	return true, `Unlocked Plot Slot #{profile.MaxSlimes} ({profile.MaxSlimes}/{GameConfig.Slots.ExpandedMaxSlimes})!`
+end
+
+function ProgressionLogic.PurchaseMultiplierTier(
+	profile: PlayerProfile,
+	trackId: GameConfig.MultiplierTrackId
+): (boolean, string)
+	local track = GameConfig.MultiplierTracksById[trackId]
+	if not track then
+		return false, "Unknown multiplier upgrade"
+	end
+	local nextTier, curMult = ProgressionLogic.GetNextMultiplierTier(profile, trackId)
+	if not nextTier then
+		return false, `{track.Name} is already at MAX ({curMult}x)!`
+	end
+	if profile.Gems < nextTier.GemCost then
+		return false, needText("Gems", nextTier.GemCost)
+	end
+	profile.Gems -= nextTier.GemCost
+	profile.OwnedBoosts[nextTier.BoostId] = true
+	return true, `Unlocked {nextTier.Name}!`
 end
 
 function ProgressionLogic.RollSlimeForZone(zoneIndex: number, unitRandom: number, luckMultiplier: number?): GameConfig.SlimeDef
@@ -575,8 +695,8 @@ function ProgressionLogic.RollSlimeForZone(zoneIndex: number, unitRandom: number
 	local weights = {}
 	local totalWeight = 0
 	for i, slime in pool do
-		-- Higher luck boosts rarer slimes in the zone pool
-		local w = if i == 1 then slime.DropWeight else slime.DropWeight * (luck ^ (i - 1))
+		-- Calibrated exponent so 2x -> 10x Luck visibly boosts rarest slimes across all zones
+		local w = if i == 1 then slime.DropWeight else slime.DropWeight * (luck ^ (0.55 * (i - 1)))
 		weights[i] = w
 		totalWeight += w
 	end
@@ -592,12 +712,21 @@ function ProgressionLogic.RollSlimeForZone(zoneIndex: number, unitRandom: number
 	return pool[#pool]
 end
 
+local MUTATION_LUCK_EXPONENT: { [string]: number } = {
+	NORMAL = 0,
+	EMERALD = 0.45,
+	GOLDEN = 0.65,
+	CRYSTAL = 0.85,
+	RAINBOW = 1.05,
+}
+
 function ProgressionLogic.RollMutation(unitRandom: number, luckMultiplier: number?): GameConfig.MutationDef
 	local luck = math.max(1.0, luckMultiplier or 1.0)
 	local weights = {}
 	local totalWeight = 0
 	for i, mut in GameConfig.Mutations do
-		local w = if mut.Id == "NORMAL" then mut.Weight else mut.Weight * luck
+		local exp = MUTATION_LUCK_EXPONENT[mut.Id] or 0
+		local w = if exp <= 0 then mut.Weight else mut.Weight * (luck ^ exp)
 		weights[i] = w
 		totalWeight += w
 	end
@@ -624,10 +753,9 @@ function ProgressionLogic.EvaluateThrowReward(
 ): ThrowRewardOutcome
 	local zone = GameConfig.Zones[landedZoneIndex] or GameConfig.Zones[1]
 	local cleanDist = math.max(1, distance)
-	local cashBoost = if profile.OwnedBoosts.double_cash then 2.0 else 1.0
-	local passCash = ProgressionLogic.GetPassCashMultiplier(profile)
+	local cashMult = ProgressionLogic.GetCashMultiplier(profile)
 	local trailMult = ProgressionLogic.GetTrailMultiplier(profile, "Cash")
-	local cashEarned = math.max(5, math.floor(cleanDist * zone.CashPerStud * cashBoost * passCash * trailMult + 0.5))
+	local cashEarned = math.max(5, math.floor(cleanDist * zone.CashPerStud * cashMult * trailMult + 0.5))
 	profile.Cash += cashEarned
 	profile.TotalThrows += 1
 
@@ -648,7 +776,7 @@ function ProgressionLogic.EvaluateThrowReward(
 	profile.DiscoveredSlimes[caughtDef.Id] = true
 
 	-- Gems: rare catch + first time reaching this zone + any Index milestone the catch completed
-	local catchGems = ProgressionLogic.GetCatchGems(caughtDef, mutDef.Id)
+	local catchGems = scaleEarnedGems(profile, ProgressionLogic.GetCatchGems(caughtDef, mutDef.Id))
 	profile.Gems += catchGems
 	local zoneGems = ProgressionLogic.AwardZoneReach(profile, zone.Index)
 	local indexGems = ProgressionLogic.AwardIndexMilestones(profile)
@@ -664,12 +792,13 @@ function ProgressionLogic.EvaluateThrowReward(
 	local isSuperLucky = (oddsOneInX >= 10) or (mutDef.Id ~= "NORMAL")
 
 	local autoPlaced = false
+	local maxSlots = ProgressionLogic.GetEffectiveMaxSlimes(profile)
 	if putInHotbarOnly == true then
 		table.insert(profile.UnplacedSlimes, instance)
 	else
-		-- Find first free slot up to profile.MaxSlimes
+		-- Find first free slot up to effective MaxSlimes
 		local freeSlot: number? = nil
-		for slot = 1, profile.MaxSlimes do
+		for slot = 1, maxSlots do
 			if not profile.PlacedSlimesBySlot[slot] then
 				freeSlot = slot
 				break
@@ -707,8 +836,12 @@ function ProgressionLogic.EvaluateThrowReward(
 end
 
 function ProgressionLogic.PlaceSlimeAtSlot(profile: PlayerProfile, slimeUid: string, slotIndex: number): (boolean, string)
+	if type(slotIndex) ~= "number" or slotIndex ~= slotIndex or math.abs(slotIndex) == math.huge then
+		return false, "That slot is locked!"
+	end
 	local slot = math.floor(slotIndex)
-	if slot < 1 or slot > profile.MaxSlimes then
+	local maxSlots = ProgressionLogic.GetEffectiveMaxSlimes(profile)
+	if slot < 1 or slot > maxSlots then
 		return false, "That slot is locked!"
 	end
 
@@ -738,7 +871,13 @@ function ProgressionLogic.PlaceSlimeAtSlot(profile: PlayerProfile, slimeUid: str
 end
 
 function ProgressionLogic.PickupSlimeFromSlot(profile: PlayerProfile, slotIndex: number): (boolean, string)
+	if type(slotIndex) ~= "number" or slotIndex ~= slotIndex or math.abs(slotIndex) == math.huge then
+		return false, "Slot is empty"
+	end
 	local slot = math.floor(slotIndex)
+	if slot < 1 or slot > GameConfig.Slots.ExpandedMaxSlimes then
+		return false, "Slot is empty"
+	end
 	local existing = profile.PlacedSlimesBySlot[slot]
 	if not existing then
 		return false, "Slot is empty"
@@ -747,6 +886,66 @@ function ProgressionLogic.PickupSlimeFromSlot(profile: PlayerProfile, slotIndex:
 	table.insert(profile.UnplacedSlimes, existing)
 	syncLegacyArrays(profile)
 	return true, `Picked up {existing.Name} into your hotbar!`
+end
+
+function ProgressionLogic.GetSlimeSellPrice(inst: SlimeInstance): number
+	local cfg = GameConfig.Sell
+	return math.max(cfg.MinSellPrice, math.floor((inst.IncomePerSec or 0) * cfg.IncomeSecondsMultiplier + 0.5))
+end
+
+local function ensureValidEquippedSlime(profile: PlayerProfile)
+	for _, id in profile.OwnedSlimes do
+		if id == profile.EquippedSlimeId then
+			return
+		end
+	end
+	if #profile.OwnedSlimes > 0 then
+		profile.EquippedSlimeId = ProgressionLogic.GetRarestSlimeDef(profile).Id
+	else
+		profile.EquippedSlimeId = GameConfig.Slimes[1].Id
+	end
+end
+
+function ProgressionLogic.SellSlime(profile: PlayerProfile, slimeUid: string): (boolean, string, number)
+	if type(slimeUid) ~= "string" or slimeUid == "" then
+		return false, "Invalid slime", 0
+	end
+	local foundIdx: number? = nil
+	local foundInst: SlimeInstance? = nil
+	for i, inst in profile.UnplacedSlimes do
+		if inst.Uid == slimeUid then
+			foundIdx = i
+			foundInst = inst
+			break
+		end
+	end
+	if not foundIdx or not foundInst then
+		return false, "Pick up the slime from your plot before selling it!", 0
+	end
+	local price = ProgressionLogic.GetSlimeSellPrice(foundInst)
+	table.remove(profile.UnplacedSlimes, foundIdx)
+	profile.Cash += price
+	syncLegacyArrays(profile)
+	ensureValidEquippedSlime(profile)
+	QuestLogic.RecordEvent(profile, "EarnCash", price)
+	return true, `Sold {foundInst.Name} for +${GameConfig.FormatNumber(price)}!`, price
+end
+
+function ProgressionLogic.SellAllUnplacedSlimes(profile: PlayerProfile): (boolean, string, number, number)
+	local count = #profile.UnplacedSlimes
+	if count == 0 then
+		return false, "No slimes in your backpack to sell!", 0, 0
+	end
+	local totalCash = 0
+	for _, inst in profile.UnplacedSlimes do
+		totalCash += ProgressionLogic.GetSlimeSellPrice(inst)
+	end
+	profile.UnplacedSlimes = {}
+	profile.Cash += totalCash
+	syncLegacyArrays(profile)
+	ensureValidEquippedSlime(profile)
+	QuestLogic.RecordEvent(profile, "EarnCash", totalCash)
+	return true, `Sold {count} slime{if count == 1 then "" else "s"} for +${GameConfig.FormatNumber(totalCash)}!`, totalCash, count
 end
 
 function ProgressionLogic.GetZoneIndexProgress(profile: PlayerProfile, zoneIndex: number): {
@@ -800,13 +999,13 @@ function ProgressionLogic.ClaimFreeGiftSlime(profile: PlayerProfile): (boolean, 
 	return true, `Claimed free {inst.Mutation} {inst.Name} (+${inst.IncomePerSec}/s)!{milestoneSuffix(indexGems)}`, inst
 end
 
--- Boosts are paid in their own PriceKind (x2 boosts = Cash, Auto-Throw / Lucky Charm = Gems).
+-- Boosts are paid in their own PriceKind (Auto-Throw / multipliers = Gems).
 function ProgressionLogic.PurchaseShopBoost(profile: PlayerProfile, boostId: string): (boolean, string)
 	local boost = GameConfig.ShopBoosts[boostId]
 	if not boost then
 		return false, "Unknown boost"
 	end
-	if profile.OwnedBoosts[boostId] then
+	if profile.OwnedBoosts[boostId] or (boostId == "auto_throw" and ProgressionLogic.OwnsAutoThrow(profile)) then
 		return false, `You already own {boost.Name}!`
 	end
 	if ProgressionLogic.GetBalance(profile, boost.PriceKind) < boost.Cost then
@@ -938,6 +1137,7 @@ export type ShopStateInput = {
 	BaitTier: number?,
 	MaxSlimes: number?,
 	OwnedBoosts: { [string]: boolean }?,
+	OwnedPasses: { [string]: boolean }?,
 	ClaimedFreeGift: boolean?,
 }
 
@@ -967,7 +1167,7 @@ local function buildListingEntry(item: GameConfig.ShopCatalogItem, s: ShopStateI
 			priceKind = boostDef.PriceKind
 		end
 	end
-	local cash = ProgressionLogic.GetBalance(s, priceKind) -- balance of the wallet this item is paid from
+	local balance = ProgressionLogic.GetBalance(s, priceKind) -- balance of the wallet this item is paid from
 	local entry: ShopListingEntry = {
 		Id = item.Id,
 		Category = item.Category,
@@ -985,7 +1185,7 @@ local function buildListingEntry(item: GameConfig.ShopCatalogItem, s: ShopStateI
 	local function setPrice(price: number)
 		entry.Price = price
 		entry.PriceText = priceText(price, priceKind)
-		entry.State = if cash >= price then "Available" else "Unaffordable"
+		entry.State = if balance >= price then "Available" else "Unaffordable"
 	end
 
 	if item.Action == "PowerUpgrade" then
@@ -995,14 +1195,14 @@ local function buildListingEntry(item: GameConfig.ShopCatalogItem, s: ShopStateI
 		entry.Title = `Upgrade Power (Lv.{lvl})`
 		entry.Subtitle = `+{GameConfig.FormatNumber(gain)} Throw Power`
 		setPrice(cost)
-		entry.Options = { option(1, "Buy", cost, cash), option("max", "Buy Max", cost, cash) }
+		entry.Options = { option(1, "Buy", cost, balance), option("max", "Buy Max", cost, balance) }
 	elseif item.Action == "PullUpTier" then
 		local nextTier = GameConfig.PullUpTiers[(s.PullUpTier or 1) + 1]
 		if nextTier then
 			entry.Title = nextTier.Name
 			entry.Subtitle = `+{nextTier.XPPerRep} XP/rep, {nextTier.SpeedMult}x rep speed`
 			setPrice(nextTier.Cost)
-			entry.Options = { option(1, "Buy", nextTier.Cost, cash) }
+			entry.Options = { option(1, "Buy", nextTier.Cost, balance) }
 		else
 			local cur = GameConfig.PullUpTiers[#GameConfig.PullUpTiers]
 			entry.Title = cur.Name
@@ -1017,7 +1217,7 @@ local function buildListingEntry(item: GameConfig.ShopCatalogItem, s: ShopStateI
 			entry.Title = nextTier.Name
 			entry.Subtitle = `Bait Luck {curTier.LuckMultiplier}x -> {nextTier.LuckMultiplier}x`
 			setPrice(nextTier.Cost)
-			entry.Options = { option(1, "Buy", nextTier.Cost, cash) }
+			entry.Options = { option(1, "Buy", nextTier.Cost, balance) }
 		else
 			entry.Title = curTier.Name
 			entry.Subtitle = `Jelly Bait is at MAX TIER ({curTier.LuckMultiplier}x Luck)`
@@ -1025,16 +1225,37 @@ local function buildListingEntry(item: GameConfig.ShopCatalogItem, s: ShopStateI
 			entry.PriceText = "MAX"
 		end
 	elseif item.Action == "SlotExpansion" then
-		local cost = ProgressionLogic.GetSlotExpansionCost(priceKind)
-		entry.Title = `+{GameConfig.Slots.ExpandedMaxSlimes - GameConfig.Slots.InitialMaxSlimes} Slime Slots`
-		entry.Subtitle = `Plot capacity {GameConfig.Slots.InitialMaxSlimes} -> {GameConfig.Slots.ExpandedMaxSlimes}`
-		if (s.MaxSlimes or GameConfig.Slots.InitialMaxSlimes) >= GameConfig.Slots.ExpandedMaxSlimes then
+		local curMax = ProgressionLogic.GetEffectiveMaxSlimes(s)
+		local nextSlot = curMax + 1
+		local cost = GameConfig.GetNextSlotGemCost(curMax)
+		if curMax >= GameConfig.Slots.ExpandedMaxSlimes or not cost then
+			entry.Title = `Plot Slots ({GameConfig.Slots.ExpandedMaxSlimes}/{GameConfig.Slots.ExpandedMaxSlimes})`
 			entry.Subtitle = `All {GameConfig.Slots.ExpandedMaxSlimes} slime slots unlocked`
 			entry.State = "Maxed"
 			entry.PriceText = "MAX"
 		else
+			entry.Title = `Unlock Plot Slot #{nextSlot}`
+			entry.Subtitle = `Plot capacity {curMax} -> {nextSlot} (or +4 Slots Robux Pass)`
 			setPrice(cost)
-			entry.Options = { option(1, "Buy", cost, cash) }
+			entry.Options = { option(1, "Unlock", cost, balance) }
+		end
+	elseif item.Action == "MultiplierTier" then
+		local trackId = (item.Args.TrackId or "") :: GameConfig.MultiplierTrackId
+		local track = GameConfig.MultiplierTracksById[trackId]
+		if track then
+			local nextTier, curMult = ProgressionLogic.GetNextMultiplierTier(s, trackId)
+			if nextTier then
+				entry.Title = nextTier.Name
+				entry.Subtitle = `{curMult}x -> {nextTier.Multiplier}x {track.ShortStat}`
+				setPrice(nextTier.GemCost)
+				entry.Options = { option(1, "Upgrade", nextTier.GemCost, balance) }
+			else
+				local top = track.Tiers[#track.Tiers]
+				entry.Title = top.Name
+				entry.Subtitle = `{track.ShortStat} at MAX ({top.Multiplier}x)`
+				entry.State = "Maxed"
+				entry.PriceText = "MAX"
+			end
 		end
 	elseif item.Action == "Boost" then
 		local boostId = item.Args.BoostId or ""
@@ -1042,12 +1263,14 @@ local function buildListingEntry(item: GameConfig.ShopCatalogItem, s: ShopStateI
 		if boost then
 			entry.Title = boost.Name
 			entry.Subtitle = boost.Description
-			if s.OwnedBoosts and s.OwnedBoosts[boostId] then
+			local owned = (s.OwnedBoosts and s.OwnedBoosts[boostId] == true)
+				or (boostId == "auto_throw" and ProgressionLogic.OwnsAutoThrow(s))
+			if owned then
 				entry.State = "Owned"
 				entry.PriceText = "OWNED"
 			else
 				setPrice(boost.Cost)
-				entry.Options = { option(1, "Buy", boost.Cost, cash) }
+				entry.Options = { option(1, "Buy", boost.Cost, balance) }
 			end
 		end
 	elseif item.Action == "Egg" then
@@ -1071,7 +1294,7 @@ local function buildListingEntry(item: GameConfig.ShopCatalogItem, s: ShopStateI
 			entry.PriceText = "CLAIMED"
 		else
 			setPrice(0)
-			entry.Options = { option(1, "CLAIM!", 0, cash) }
+			entry.Options = { option(1, "CLAIM!", 0, balance) }
 		end
 	end
 
@@ -1135,6 +1358,10 @@ function ProgressionLogic.Purchase(profile: PlayerProfile, itemId: string, quant
 			return ok, msg, nil
 		elseif item.Action == "SlotExpansion" then
 			local ok, msg = ProgressionLogic.PurchaseSlotExpansion(profile, item.PriceKind)
+			return ok, msg, nil
+		elseif item.Action == "MultiplierTier" then
+			local trackId = (item.Args.TrackId or "") :: GameConfig.MultiplierTrackId
+			local ok, msg = ProgressionLogic.PurchaseMultiplierTier(profile, trackId)
 			return ok, msg, nil
 		elseif item.Action == "Boost" then
 			local ok, msg = ProgressionLogic.PurchaseShopBoost(profile, item.Args.BoostId or "")
@@ -1211,14 +1438,20 @@ function ProgressionLogic.PlaceBestSlimes(profile: PlayerProfile)
 	profile.PlacedSlimesBySlot = {}
 	profile.UnplacedSlimes = {}
 
+	local placedCount = 0
+	local maxSlots = ProgressionLogic.GetEffectiveMaxSlimes(profile)
 	for i, inst in allInstances do
-		if i <= profile.MaxSlimes then
+		if i <= maxSlots then
 			profile.PlacedSlimesBySlot[i] = inst
+			placedCount += 1
 		else
 			table.insert(profile.UnplacedSlimes, inst)
 		end
 	end
 	syncLegacyArrays(profile)
+	if placedCount > 0 then
+		QuestLogic.RecordEvent(profile, "PlaceSlime", placedCount)
+	end
 end
 
 function ProgressionLogic.GetCurrentObjective(
@@ -1227,7 +1460,8 @@ function ProgressionLogic.GetCurrentObjective(
 ): { Text: string, TargetType: "ThrowLine" | "Hotbar" | "PlotSlot" | "PullUpBar" }
 	if #profile.UnplacedSlimes > 0 then
 		local freeSlotExists = false
-		for s = 1, profile.MaxSlimes do
+		local maxSlots = ProgressionLogic.GetEffectiveMaxSlimes(profile)
+		for s = 1, maxSlots do
 			if not profile.PlacedSlimesBySlot[s] then
 				freeSlotExists = true
 				break

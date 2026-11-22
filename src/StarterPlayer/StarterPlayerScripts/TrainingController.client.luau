@@ -68,6 +68,8 @@ local function getOwnBar(): BasePart?
 	return nil
 end
 
+local latestPlayerState: any = nil
+
 -- Hide the Upgrade Bar prompt on other players' plots locally so only your own bar shows E
 local function refreshBarPromptVisibility()
 	local map = workspace:FindFirstChild("Map")
@@ -79,12 +81,17 @@ local function refreshBarPromptVisibility()
 	local plotId = localPlayer:GetAttribute("PlotId")
 	local uidStr = tostring(localPlayer.UserId)
 	for _, plot in bases:GetChildren() do
-		local isOwn = plot:GetAttribute("Owner") == uidStr or (plotId ~= nil and plot:GetAttribute("PlotId") == plotId)
-		if not isOwn then
-			local pullUp = plot:FindFirstChild("PullUpBar")
-			local bar = pullUp and pullUp:FindFirstChild("Bar")
-			local prompt = bar and bar:FindFirstChildOfClass("ProximityPrompt")
-			if prompt then
+		local ownerAttr = plot:GetAttribute("Owner")
+		local hasOwner = type(ownerAttr) == "string" and ownerAttr ~= ""
+		local isOwn = ownerAttr == uidStr or (plotId ~= nil and plot:GetAttribute("PlotId") == plotId)
+		local pullUp = plot:FindFirstChild("PullUpBar")
+		local bar = pullUp and pullUp:FindFirstChild("Bar")
+		local prompt = bar and bar:FindFirstChildOfClass("ProximityPrompt")
+		if prompt then
+			if isOwn then
+				local tier = if type(latestPlayerState) == "table" then (latestPlayerState.PullUpTier or 1) else 1
+				prompt.Enabled = tier < #GameConfig.PullUpTiers
+			elseif hasOwner then
 				prompt.Enabled = false
 			end
 		end
@@ -479,7 +486,6 @@ local upgradeBtn = UiKit.CreateGradientButton({
 local upgradeLabel = upgradeBtn:FindFirstChild("Label", true) :: TextLabel
 local canUpgrade = false
 
-local latestPlayerState: any = nil
 local function refreshNextBar()
 	local state = latestPlayerState
 	if type(state) ~= "table" then
@@ -785,8 +791,6 @@ trainingState.OnClientEvent:Connect(function(payload: any)
 	if type(payload) ~= "table" then
 		return
 	end
-	-- Temporary diagnostics (remove with CharacterAnimator's DEBUG prints)
-	print("[TrainingController] TrainingState", payload.Active, payload.Interval, payload.Reason)
 	if payload.Active then
 		isTraining = true
 		stopRequested = false

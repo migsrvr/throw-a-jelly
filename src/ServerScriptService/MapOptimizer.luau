@@ -196,7 +196,32 @@ local function deconflictHub(hub: Instance)
 			if details then
 				optimizeDecorativeContainer(details, true)
 			end
+
+			-- Remove white neon ground circles at plot entrance (ClaimPad) and pull-up bar (TrainSpot)
+			local claimPad = plot:FindFirstChild("ClaimPad")
+			if claimPad and claimPad:IsA("BasePart") then
+				claimPad.Transparency = 1
+				claimPad.CanCollide = false
+				claimPad.CanTouch = false
+				claimPad.CanQuery = false
+				claimPad.CastShadow = false
+			end
+			local pullUp = plot:FindFirstChild("PullUpBar")
+			local trainSpot = pullUp and pullUp:FindFirstChild("TrainSpot")
+			if trainSpot and trainSpot:IsA("BasePart") then
+				trainSpot.Transparency = 1
+				trainSpot.CanCollide = false
+				trainSpot.CanTouch = false
+				trainSpot.CanQuery = false
+				trainSpot.CastShadow = false
+			end
 		end
+	end
+
+	-- 6. Hub.EdgeGuard: widen front cliff safety wall to span the full Hub width (X = [-142, +142])
+	local edgeGuard = hub:FindFirstChild("EdgeGuard", true)
+	if edgeGuard and edgeGuard:IsA("BasePart") then
+		edgeGuard.Size = Vector3.new(math.max(284, edgeGuard.Size.X), edgeGuard.Size.Y, edgeGuard.Size.Z)
 	end
 end
 

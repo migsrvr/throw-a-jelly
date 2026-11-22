@@ -17,6 +17,7 @@ local UiAssets = require(Shared:WaitForChild("UiAssets"))
 local UiKit = require(Shared:WaitForChild("UiKit"))
 
 local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+local activePromptCleanups: { [ProximityPrompt]: () -> () } = {}
 
 local function makeCustom(prompt: Instance)
 	if prompt:IsA("ProximityPrompt") then
@@ -42,6 +43,9 @@ end
 ProximityPromptService.PromptShown:Connect(function(prompt: ProximityPrompt, inputType: Enum.ProximityPromptInputType)
 	if prompt.Style ~= Enum.ProximityPromptStyle.Custom then
 		return
+	end
+	if activePromptCleanups[prompt] then
+		activePromptCleanups[prompt]()
 	end
 
 	local gui = Instance.new("BillboardGui")
@@ -168,11 +172,16 @@ ProximityPromptService.PromptShown:Connect(function(prompt: ProximityPrompt, inp
 		object.Text = prompt.ObjectText
 	end)
 
+	local cleanedUp = false
 	local hiddenConn: RBXScriptConnection? = nil
-	hiddenConn = ProximityPromptService.PromptHidden:Connect(function(hiddenPrompt: ProximityPrompt)
-		if hiddenPrompt ~= prompt then
+	local ancestryConn: RBXScriptConnection? = nil
+
+	local function cleanup()
+		if cleanedUp then
 			return
 		end
+		cleanedUp = true
+		activePromptCleanups[prompt] = nil
 		holdBegan:Disconnect()
 		holdEnded:Disconnect()
 		changed:Disconnect()
@@ -180,7 +189,22 @@ ProximityPromptService.PromptShown:Connect(function(prompt: ProximityPrompt, inp
 		if hiddenConn then
 			hiddenConn:Disconnect()
 		end
+		if ancestryConn then
+			ancestryConn:Disconnect()
+		end
 		gui:Destroy()
+	end
+
+	activePromptCleanups[prompt] = cleanup
+	hiddenConn = ProximityPromptService.PromptHidden:Connect(function(hiddenPrompt: ProximityPrompt)
+		if hiddenPrompt == prompt then
+			cleanup()
+		end
+	end)
+	ancestryConn = prompt.AncestryChanged:Connect(function()
+		if not prompt:IsDescendantOf(game) then
+			cleanup()
+		end
 	end)
 end)
 

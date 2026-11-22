@@ -235,7 +235,7 @@ function WorldUi.SetPullUp(plot: Model, tierIndex: number)
 end
 
 -- ============================================================================
--- Upgrade stand: orange header, "8 ▶ 12", Cash and Gem price chips
+-- Upgrade stand: orange header, "8 ▶ 9", next slot Gem cost + Robux Pass hint
 -- ============================================================================
 function WorldUi.SetUpgradeStand(plot: Model, maxSlimes: number)
 	local stand = plot:FindFirstChild("UpgradeStand")
@@ -253,7 +253,7 @@ function WorldUi.SetUpgradeStand(plot: Model, maxSlimes: number)
 	if bb then
 		bb:Destroy()
 	end
-	local gui = getBillboard(backing, "UpgradeSign", Vector2.new(260, 140), Vector3.new(0, 4.5, 0), backing)
+	local gui = getBillboard(backing, "UpgradeSign", Vector2.new(270, 152), Vector3.new(0, 4.5, 0), backing)
 	local card = makeCard(gui, CARD_TONE, 20)
 	card.Size = UDim2.fromScale(1, 1)
 	local header = Instance.new("Frame")
@@ -263,37 +263,39 @@ function WorldUi.SetUpgradeStand(plot: Model, maxSlimes: number)
 	UiKit.AddCorner(header, 20)
 	UiKit.ApplyTri(header, UiKit.Gradients.Orange)
 	UiKit.AddStripes(header, 20)
-	local title = makeLabel(header, 24, if maxed then "MAX SLOTS" else "+4 SLOTS")
+	local nextSlot = maxSlimes + 1
+	local title = makeLabel(header, 24, if maxed then "MAX SLOTS" else `UNLOCK SLOT #{nextSlot}`)
 	title.Size = UDim2.fromScale(1, 1)
-	local from = GameConfig.Slots.InitialMaxSlimes
 	local to = GameConfig.Slots.ExpandedMaxSlimes
-	local line = makeLabel(card, 34, if maxed then `{to} / {to}` else `{from} ▶ {to}`, UiKit.Gradients.Green)
-	line.Position = UDim2.fromOffset(0, 48)
-	line.Size = UDim2.new(1, 0, 0, 40)
+	local line = makeLabel(card, 32, if maxed then `{to} / {to}` else `{maxSlimes} ▶ {nextSlot}`, UiKit.Gradients.Green)
+	line.Position = UDim2.fromOffset(0, 46)
+	line.Size = UDim2.new(1, 0, 0, 36)
 	if not maxed then
+		local gemCost = GameConfig.GetNextSlotGemCost(maxSlimes) or 1500
 		local chips = Instance.new("Frame")
 		chips.BackgroundTransparency = 1
-		chips.Position = UDim2.fromOffset(0, 92)
-		chips.Size = UDim2.new(1, 0, 0, 38)
+		chips.Position = UDim2.fromOffset(0, 84)
+		chips.Size = UDim2.new(1, 0, 0, 34)
 		chips.Parent = card
 		local layout = Instance.new("UIListLayout")
 		layout.FillDirection = Enum.FillDirection.Horizontal
 		layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 		layout.VerticalAlignment = Enum.VerticalAlignment.Center
-		layout.Padding = UDim.new(0, 12)
+		layout.Padding = UDim.new(0, 6)
 		layout.Parent = chips
-		local cash = makeLabel(chips, 22, `${GameConfig.FormatNumber(ProgressionLogic.GetSlotExpansionCost("Cash"))}`, UiKit.Gradients.Cash)
-		cash.AutomaticSize = Enum.AutomaticSize.X
-		cash.Size = UDim2.fromOffset(0, 38)
-		local gems = makeLabel(chips, 22, `{GameConfig.FormatNumber(ProgressionLogic.GetSlotExpansionCost("Gems"))}`, UiKit.Gradients.Gems)
+		UiKit.CreateIcon(chips, "gem", 26)
+		local gems = makeLabel(chips, 24, `{GameConfig.FormatNumber(gemCost)} Gems`, UiKit.Gradients.Gems)
 		gems.AutomaticSize = Enum.AutomaticSize.X
-		gems.Size = UDim2.fromOffset(0, 38)
-		UiKit.CreateIcon(chips, "gem", 28)
+		gems.Size = UDim2.fromOffset(0, 34)
+
+		local hint = makeLabel(card, 16, "or +4 Slots Pass in Shop", UiKit.Gradients.Luck)
+		hint.Position = UDim2.fromOffset(0, 120)
+		hint.Size = UDim2.new(1, 0, 0, 24)
 	end
 end
 
 -- ============================================================================
--- Slot signs: filled (rarity gradient), locked (grey + lock + price), empty (gold "Place Slime")
+-- Slot signs: filled (rarity gradient), locked (grey + lock + Gem price), empty (gold "Place Slime")
 -- ============================================================================
 function WorldUi.SetSlot(slotPart: BasePart, slotIdx: number, unlocked: boolean, inst: any?)
 	local old = slotPart:FindFirstChild("SlotSign")
@@ -301,16 +303,21 @@ function WorldUi.SetSlot(slotPart: BasePart, slotIdx: number, unlocked: boolean,
 		old:Destroy()
 	end
 	if not unlocked then
-		local bb = getBillboard(slotPart, "SlotSign", Vector2.new(120, 50), Vector3.new(0, 3, 0), slotPart)
+		local slotCost = GameConfig.Slots.SlotUnlockGemCosts[slotIdx] or 1500
+		local bb = getBillboard(slotPart, "SlotSign", Vector2.new(150, 52), Vector3.new(0, 3, 0), slotPart)
 		setMaxDistance(bb, SLOT_MAX_DISTANCE)
 		local card = makeCard(bb, UiKit.Gradients.Grey, 16)
 		card.Size = UDim2.fromScale(1, 1)
-		local lock = UiKit.CreateIcon(card, "lock", 34)
+		local lock = UiKit.CreateIcon(card, "lock", 28)
 		lock.AnchorPoint = Vector2.new(0, 0.5)
-		lock.Position = UDim2.new(0, 12, 0.5, 0)
-		local price = makeLabel(card, 22, `${GameConfig.FormatNumber(GameConfig.Slots.ExpansionCost)}`)
-		price.Position = UDim2.fromOffset(52, 0)
-		price.Size = UDim2.new(1, -60, 1, 0)
+		lock.Position = UDim2.new(0, 10, 0.5, 0)
+		local gemIcon = UiKit.CreateIcon(card, "gem", 24)
+		gemIcon.AnchorPoint = Vector2.new(0, 0.5)
+		gemIcon.Position = UDim2.new(0, 42, 0.5, 0)
+		local price = makeLabel(card, 22, GameConfig.FormatNumber(slotCost), UiKit.Gradients.Gems)
+		price.Position = UDim2.fromOffset(70, 0)
+		price.Size = UDim2.new(1, -76, 1, 0)
+		price.TextXAlignment = Enum.TextXAlignment.Left
 		return
 	end
 	if not inst then

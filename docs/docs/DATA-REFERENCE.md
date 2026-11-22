@@ -108,10 +108,10 @@ Bought in the Shop. Better bait does not throw further; it multiplies the luck o
 | Tier | Name | Cost | Luck multiplier | Colour |
 | --- | --- | --- | --- | --- |
 | 1 | Carrot Jelly | (starting bait) | 1.00x | #FF7D28 |
-| 2 | Berry Jelly | $150 | 1.35x | #C846A0 |
-| 3 | Crystal Honey | $900 | 1.85x | #FFCD46 |
-| 4 | Magma Tart | $4.5K | 2.60x | #FF5F2D |
-| 5 | Starlight Cake | $22.0K | 4.00x | #AA96FF |
+| 2 | Berry Jelly | $600 | 1.35x | #C846A0 |
+| 3 | Crystal Honey | $8.0K | 1.85x | #FFCD46 |
+| 4 | Magma Tart | $120.0K | 2.60x | #FF5F2D |
+| 5 | Starlight Cake | $2.00M | 4.00x | #AA96FF |
 
 ## Pull-up bar tiers (5)
 
@@ -120,10 +120,10 @@ Training on the bar gives Training XP. A better bar gives more XP per rep and al
 | Tier | Name | Upgrade cost | XP per rep | Rep speed multiplier |
 | --- | --- | --- | --- | --- |
 | 1 | PULL-UP BAR | (starting bar) | +2 | x1 |
-| 2 | IRON BAR | $75 | +8 | x1.15 |
-| 3 | CRYSTAL BAR | $450 | +32 | x1.3 |
-| 4 | MAGMA BAR | $2.5K | +140 | x1.5 |
-| 5 | STARLIGHT BAR | $15.0K | +600 | x1.75 |
+| 2 | IRON BAR | $350 | +8 | x1.15 |
+| 3 | CRYSTAL BAR | $4.5K | +32 | x1.3 |
+| 4 | MAGMA BAR | $75.0K | +140 | x1.5 |
+| 5 | STARLIGHT BAR | $1.20M | +600 | x1.75 |
 
 ### Strength levels
 
@@ -172,15 +172,15 @@ These are the shop's building blocks. A button or card in the shop = one row her
 | power_upgrade | Upgrade | ⚡ | Cash | Raises Throw Power by one upgrade level (price grows each level) | #EB962D |
 | pullup_tier | Upgrade | 💪 | Cash | Upgrades the pull-up bar to the next tier | #379BF0 |
 | bait_tier | Upgrade | 🥕 | Cash | Upgrades the Jelly Bait to the next quality tier (more luck) | #FF7D28 |
-| slot_expansion | Upgrade | 🧺 | Cash | Adds 4 more slime slots to the plot (8 to 12); the Cash and Gem versions unlock the same slots | #5FC878 |
-| boost_double_cash | Boost | 💵 | Cash | Permanent boost (see boosts below) | #2DB9EB |
-| boost_double_power | Boost | 💪 | Cash | Permanent boost (see boosts below) | #A55FF5 |
 | egg_enchanted | Egg | 🥚 | Robux | Hatches 1 or 3 slimes with the odds listed below | #AF6EFF |
 | egg_rainbow | Egg | 🌈 | Robux | Hatches 1 or 3 slimes with the odds listed below | #FF78C8 |
 | free_gift | Gift | 🎁 | Cash | One-time free slime | #FFCD37 |
+| gem_slot_unlock | Gem | 🧺 | Gems | Unlocks locked Plot Slots 9-12 one-by-one with Gems (or all 4 via +4 Plot Slots Pass) | #5FC878 |
 | gem_auto_throw | Gem | 🤖 | Gems | Permanent boost (see boosts below) | #50D2E6 |
-| gem_lucky_charm | Gem | 🍀 | Gems | Permanent boost (see boosts below) | #5AE178 |
-| gem_slot_expansion | Gem | 🧺 | Gems | Adds 4 more slime slots to the plot (8 to 12); the Cash and Gem versions unlock the same slots | #5FC878 |
+| gem_money_2x | Gem | 💵 | Gems | Upgrades a permanent multiplier track (2x -> 4x -> 6x -> 8x -> 10x) with Gems or Robux Pass | #37C3FA |
+| gem_gems_tier | Gem | 💎 | Gems | Upgrades a permanent multiplier track (2x -> 4x -> 6x -> 8x -> 10x) with Gems or Robux Pass | #4BD2FF |
+| gem_power_tier | Gem | 💪 | Gems | Upgrades a permanent multiplier track (2x -> 4x -> 6x -> 8x -> 10x) with Gems or Robux Pass | #AA69FF |
+| gem_luck_tier | Gem | 🍀 | Gems | Upgrades a permanent multiplier track (2x -> 4x -> 6x -> 8x -> 10x) with Gems or Robux Pass | #55E173 |
 
 ### Boosts
 
@@ -188,10 +188,23 @@ All boosts are permanent once bought.
 
 | Name | Description | Price | Colour |
 | --- | --- | --- | --- |
-| x2 Cash | Double cash from every slime! | $500 | #41BEFF |
-| x2 Training Power | Double XP on every pull-up! | $750 | #A56EFF |
-| Auto-Throw | Throws for you while you stand at the throw line! | 150 Gems | #50D2E6 |
-| Lucky Charm | x1.5 Luck on every throw! | 120 Gems | #5AE178 |
+| Auto-Throw | Throws automatically at the line (3 PERFECT / 2 GREAT bag)! | 2.0K Gems | #50D2E6 |
+| 2x Gems | 2x Gems from catches, quests, zones & daily! | 2.5K Gems | #46C8FF |
+| 4x Gems | 4x Gems from catches, quests, zones & daily! | 6.0K Gems | #37AFFF |
+| 6x Gems | 6x Gems from catches, quests, zones & daily! | 12.0K Gems | #6991FF |
+| 8x Gems | 8x Gems from catches, quests, zones & daily! | 22.0K Gems | #A06EFF |
+| 10x Gems | MAX 10x Gems from every in-game source! | 38.0K Gems | #EB64FF |
+| 2x Training Power | 2x Pull-Up XP on every rep! | 1.8K Gems | #A56EFF |
+| 4x Training Power | 4x Pull-Up XP on every rep! | 4.5K Gems | #C35FFF |
+| 6x Training Power | 6x Pull-Up XP on every rep! | 9.5K Gems | #EB5FD7 |
+| 8x Training Power | 8x Pull-Up XP on every rep! | 17.5K Gems | #FF6E91 |
+| 10x Training Power | MAX 10x Pull-Up XP on every rep! | 30.0K Gems | #FF9641 |
+| 2x Luck | Permanent 2x Luck on every throw! | 2.0K Gems | #5AE178 |
+| 4x Lucky | Permanent 4x Luck for rare & Rainbow slimes! | 5.0K Gems | #41EB9B |
+| 6x Lucky | Permanent 6x Luck for Mythic & Rainbow rolls! | 10.5K Gems | #37E1D2 |
+| 8x Lucky | Permanent 8x Luck on every throw! | 19.0K Gems | #82C8FF |
+| 10x Luck | MAX 10x Luck on every throw! | 32.0K Gems | #FFCD3C |
+| 2x Money | Permanent 2x Cash from slimes & throws! | 2.2K Gems | #37C3FA |
 
 ### Eggs (Robux-only)
 
@@ -219,26 +232,25 @@ All boosts are permanent once bought.
 
 ### Free gift
 
-"Free Slime!" - "Claim your free Emerald Sakura Slime!" (Sakura Bloom Slime, EMERALD). Can be claimed once per player.
+"Free Slime!" - "Claim your free Emerald Honey Slime!" (Honey Slime, EMERALD). Can be claimed once per player.
 
 ## Plot slots
 
-Every plot starts with 8 slime slots; a one-time purchase of $5.0K (or 60 Gems) unlocks all 12.
+Every plot starts capped at 8 slime slots. Slots 9-12 are locked and can only be unlocked 1-by-1 with Gems (1.5K / 2.5K / 4.0K / 6.0K Gems) or all 4 at once via the "+4 Plot Slots" Robux Pass.
 
 ## Gems (premium currency)
 
-Shown as 💎 in the HUD and the shop. Earned slowly by playing; spent in the Gem Shop (see the Gem rows in the shop table).
-Buying Gems with Robux is planned but not built yet.
+Shown as 💎 in the HUD and the shop. Earned slowly by playing (see `docs/docs/ECONOMY-BASELINE.md` for hourly F2P targets and the 8+ hour grind floor); spent in the Gem Upgrades tab or skipped via Robux Passes & Gem Packs.
 
 ### Index milestones (paid once each)
 
 | Slimes discovered | Gems |
 | --- | --- |
-| 3 | +10 |
-| 6 | +15 |
+| 3 | +5 |
+| 6 | +12 |
 | 9 | +25 |
-| 12 | +40 |
-| 15 | +75 |
+| 12 | +45 |
+| 15 | +90 |
 
 ### First time reaching a zone (paid once per zone)
 
@@ -246,11 +258,11 @@ A throw that lands in a zone for the first time pays that zone and every zone be
 
 | Zone | Gems |
 | --- | --- |
-| 🌿 Meadow | +5 |
-| 💎 Crystal Cave | +15 |
-| 🌋 Lava Fields | +30 |
-| ❄️ Frost Peaks | +50 |
-| 🍬 Candy Land | +80 |
+| 🌿 Meadow | +3 |
+| 💎 Crystal Cave | +8 |
+| 🌋 Lava Fields | +18 |
+| ❄️ Frost Peaks | +35 |
+| 🍬 Candy Land | +75 |
 
 ### Daily login streak
 
@@ -261,27 +273,26 @@ After day 7 the streak keeps paying the day-7 amount.
 | --- | --- |
 | 1 | +5 |
 | 2 | +8 |
-| 3 | +10 |
-| 4 | +12 |
-| 5 | +15 |
-| 6 | +20 |
-| 7 | +35 |
+| 3 | +12 |
+| 4 | +16 |
+| 5 | +22 |
+| 6 | +30 |
+| 7 | +50 |
 
 ### Rare catches (throws only, not eggs)
 
-A caught slime pays its rarity amount plus its mutation amount. Anything not listed pays 0.
+A caught slime pays its rarity amount plus its mutation amount (multiplied by owned 2x-10x Gems tiers & VIP). Anything not listed pays 0.
 
 | Rarity or mutation | Gems |
 | --- | --- |
-| Legendary | +3 |
-| Mythic | +8 |
-| CRYSTAL | +3 |
-| RAINBOW | +6 |
+| Mythic | +1 |
+| CRYSTAL | +1 |
+| RAINBOW | +2 |
 
 ### Auto-Throw
 
-Once bought, an AUTO toggle appears under the throw meter. While it's on, the player throws by itself after 0.8s at the throw line,
-always stopping the meter in band 5 (+9 power, 1.15x luck), so a PERFECT by hand is still better.
+Once unlocked (via Gems or the Auto-Throw Robux Pass), an AUTO toggle appears under the visible vertical throw meter.
+While ON, the meter smoothly locks onto the next target from a server-shuffled 5-throw bag (3 PERFECT + 2 GREAT per 5 throws) and fires after 0.8s.
 
 ## Quests
 
@@ -289,31 +300,31 @@ always stopping the meter in band 5 (+9 power, 1.15x luck), so a PERFECT by hand
 
 | Step | Id | Title | Event | Target | Reward |
 | --- | --- | --- | --- | --- | --- |
-| 1 | line_throw_1 | Throw Jelly Once | Throw | 1 | 5 Gems + $25 |
-| 2 | line_place_1 | Place a Slime on Your Plot | PlaceSlime | 1 | 5 Gems + $50 |
-| 3 | line_reps_10 | Train 10 Pull-Up Reps | PullUpRep | 10 | 8 Gems + $75 |
-| 4 | line_bonus_1 | Tap a Bonus Rep Pop-Up | BonusRep | 1 | 10 Gems + $100 |
-| 5 | line_bait_2 | Buy Berry Jelly Bait | BuyBait | 2 | 10 Gems + $150 |
-| 6 | line_zone_2 | Reach Crystal Cave (Zone 2) | ReachZone | 2 | 15 Gems + $250 |
-| 7 | line_discover_5 | Discover 5 Slimes in the Index | Discover | 5 | 15 Gems + $400 |
-| 8 | line_perfect_1 | Land a PERFECT! Throw | PerfectThrow | 1 | 20 Gems + $600 |
-| 9 | line_place_3 | Place 3 Slimes on Your Plot | PlaceSlime | 3 | 20 Gems + $1.0K |
-| 10 | line_zone_3 | Reach Lava Fields (Zone 3) | ReachZone | 3 | 30 Gems + $2.0K |
-| 11 | line_reps_100 | Complete 100 Pull-Up Reps | PullUpRep | 100 | 40 Gems + $4.0K |
-| 12 | line_zone_4 | Reach Frost Peaks (Zone 4) | ReachZone | 4 | 60 Gems + $10.0K |
+| 1 | line_throw_1 | Throw Jelly Once | Throw | 1 | 3 Gems + $40 |
+| 2 | line_place_1 | Place a Slime on Your Plot | PlaceSlime | 1 | 3 Gems + $75 |
+| 3 | line_reps_10 | Train 10 Pull-Up Reps | PullUpRep | 10 | 5 Gems + $120 |
+| 4 | line_bonus_1 | Tap a Bonus Rep Pop-Up | BonusRep | 1 | 5 Gems + $200 |
+| 5 | line_bait_2 | Buy Berry Jelly Bait | BuyBait | 2 | 8 Gems + $350 |
+| 6 | line_zone_2 | Reach Crystal Cave (Zone 2) | ReachZone | 2 | 10 Gems + $750 |
+| 7 | line_discover_5 | Discover 5 Slimes in the Index | Discover | 5 | 12 Gems + $1.5K |
+| 8 | line_perfect_1 | Land a PERFECT! Throw | PerfectThrow | 1 | 15 Gems + $2.5K |
+| 9 | line_place_3 | Place 3 Slimes on Your Plot | PlaceSlime | 3 | 15 Gems + $4.0K |
+| 10 | line_zone_3 | Reach Lava Fields (Zone 3) | ReachZone | 3 | 20 Gems + $12.0K |
+| 11 | line_reps_100 | Complete 100 Pull-Up Reps | PullUpRep | 100 | 25 Gems + $25.0K |
+| 12 | line_zone_4 | Reach Frost Peaks (Zone 4) | ReachZone | 4 | 40 Gems + $80.0K |
 
 ### Daily Quest Pool (8 templates, 3 picked per UTC day)
 
 | Id | Title | Event | Target | Reward |
 | --- | --- | --- | --- | --- |
-| daily_throws_5 | Throw Jelly 5 Times | Throw | 5 | 8 Gems |
-| daily_throws_15 | Throw Jelly 15 Times | Throw | 15 | 15 Gems |
-| daily_reps_25 | Do 25 Pull-Up Reps | PullUpRep | 25 | 10 Gems |
-| daily_bonus_3 | Hit 3 Bonus Rep Pop-Ups | BonusRep | 3 | 12 Gems |
-| daily_perfect_2 | Land 2 PERFECT! Throws | PerfectThrow | 2 | 15 Gems |
-| daily_rare_2 | Catch 2 Rare+ Slimes | CatchRarity | 2 | 15 Gems |
-| daily_place_2 | Place 2 Slimes on Your Plot | PlaceSlime | 2 | 10 Gems + $300 |
-| daily_cash_500 | Earn $500 Cash from Throws | EarnCash | 500 | 10 Gems |
+| daily_throws_5 | Throw Jelly 5 Times | Throw | 5 | 5 Gems |
+| daily_throws_15 | Throw Jelly 15 Times | Throw | 15 | 8 Gems |
+| daily_reps_25 | Do 25 Pull-Up Reps | PullUpRep | 25 | 6 Gems |
+| daily_bonus_3 | Hit 3 Bonus Rep Pop-Ups | BonusRep | 3 | 8 Gems |
+| daily_perfect_2 | Land 2 PERFECT! Throws | PerfectThrow | 2 | 10 Gems |
+| daily_rare_2 | Catch 2 Rare+ Slimes | CatchRarity | 2 | 10 Gems |
+| daily_place_2 | Place 2 Slimes on Your Plot | PlaceSlime | 2 | 6 Gems + $500 |
+| daily_cash_500 | Earn $500 Cash from Throws | EarnCash | 500 | 7 Gems |
 
 ## Robux Store
 
@@ -321,18 +332,34 @@ always stopping the meter in band 5 (+9 power, 1.15x luck), so a PERFECT by hand
 
 | Id | Name | Icon | Robux (R$) | PassId | Effect | Colour |
 | --- | --- | --- | --- | --- | --- | --- |
-| pass_x2_luck | x2 Luck | 🍀 | 149 | 0 | Permanent 2x Luck on every throw! | #55E173 |
-| pass_x2_cash | x2 Cash | 💵 | 149 | 0 | Permanent 2x Cash from slimes & throws! | #37BEFA |
-| pass_vip | VIP | 👑 | 249 | 0 | +10% Cash income and [VIP] chat tag! | #FFC332 |
+| pass_extra_slots | +4 Plot Slots | 🧺 | 249 | 0 | Instantly unlock all 4 locked plot slots (8 -> 12 Slimes)! | #5FD77D |
+| pass_auto_throw | Auto-Throw | 🤖 | 199 | 0 | Auto-throws at the line with a 3 PERFECT / 2 GREAT bag! | #50D2E6 |
+| pass_x2_cash | 2x Money | 💵 | 199 | 0 | Permanent 2x Cash from slimes & throws! | #37C3FA |
+| pass_vip | VIP | 👑 | 299 | 0 | +25% Cash, +25% Earned Gems & [VIP] chat tag! | #FFC332 |
+| pass_x2_luck | 2x Luck | 🍀 | 179 | 0 | Permanent 2x Luck on every throw! | #5AE178 |
+| pass_luck_4x | 4x Lucky | 🍀 | 349 | 0 | Permanent 4x Luck for rare & Rainbow slimes! | #41EB9B |
+| pass_luck_6x | 6x Lucky | 🍀 | 549 | 0 | Permanent 6x Luck for Mythic & Rainbow rolls! | #37E1D2 |
+| pass_luck_8x | 8x Lucky | 🍀 | 799 | 0 | Permanent 8x Luck on every throw! | #82C8FF |
+| pass_luck_10x | 10x Luck | 🍀 | 1199 | 0 | MAX 10x Luck on every throw! | #FFCD3C |
+| pass_gems_2x | 2x Gems | 💎 | 199 | 0 | 2x Gems from catches, quests, zones & daily! | #46C8FF |
+| pass_gems_4x | 4x Gems | 💎 | 349 | 0 | 4x Gems from catches, quests, zones & daily! | #37AFFF |
+| pass_gems_6x | 6x Gems | 💎 | 549 | 0 | 6x Gems from catches, quests, zones & daily! | #6991FF |
+| pass_gems_8x | 8x Gems | 💎 | 799 | 0 | 8x Gems from catches, quests, zones & daily! | #A06EFF |
+| pass_gems_10x | 10x Gems | 💎 | 1199 | 0 | MAX 10x Gems from every in-game source! | #EB64FF |
+| pass_power_2x | 2x Training Power | 💪 | 149 | 0 | 2x Pull-Up XP on every rep! | #A56EFF |
+| pass_power_4x | 4x Training Power | 💪 | 299 | 0 | 4x Pull-Up XP on every rep! | #C35FFF |
+| pass_power_6x | 6x Training Power | 💪 | 499 | 0 | 6x Pull-Up XP on every rep! | #EB5FD7 |
+| pass_power_8x | 8x Training Power | 💪 | 749 | 0 | 8x Pull-Up XP on every rep! | #FF6E91 |
+| pass_power_10x | 10x Training Power | 💪 | 1099 | 0 | MAX 10x Pull-Up XP on every rep! | #FF9641 |
 
 ### Gem Packs (Developer Products)
 
 | Id | Name | Tag | Gems | Robux (R$) | ProductId |
 | --- | --- | --- | --- | --- | --- |
-| pack_100 | 100 Gems | — | +100 | 25 | 0 |
-| pack_550 | 550 Gems | +10% Bonus | +550 | 99 | 0 |
-| pack_1200 | 1,200 Gems | +20% Bonus | +1.2K | 199 | 0 |
-| pack_2600 | 2,600 Gems | Best Value | +2.6K | 399 | 0 |
+| pack_500 | 500 Gems | — | +500 | 79 | 0 |
+| pack_1500 | 1,500 Gems | +20% Bonus | +1.5K | 199 | 0 |
+| pack_4000 | 4,000 Gems | +30% Bonus | +4.0K | 499 | 0 |
+| pack_10000 | 10,000 Gems | Best Value | +10.0K | 999 | 0 |
 
 ## Saving
 

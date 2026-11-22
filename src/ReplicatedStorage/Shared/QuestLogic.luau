@@ -178,17 +178,26 @@ function QuestLogic.RecordEvent(
 	end
 end
 
-local function payQuestReward(profile: any, reward: GameConfig.QuestReward): string
+local function payQuestReward(
+	profile: any,
+	reward: GameConfig.QuestReward,
+	gemMultiplier: number?
+): (string, GameConfig.QuestReward)
 	local parts = {}
+	local mult = math.max(1, gemMultiplier or 1)
+	local paid: GameConfig.QuestReward = {}
 	if reward.Cash and reward.Cash > 0 then
 		profile.Cash = (profile.Cash or 0) + reward.Cash
+		paid.Cash = reward.Cash
 		table.insert(parts, `+${GameConfig.FormatNumber(reward.Cash)} Cash`)
 	end
 	if reward.Gems and reward.Gems > 0 then
-		profile.Gems = (profile.Gems or 0) + reward.Gems
-		table.insert(parts, `+{GameConfig.FormatNumber(reward.Gems)} Gems`)
+		local gemsPaid = math.max(1, math.floor(reward.Gems * mult + 0.5))
+		profile.Gems = (profile.Gems or 0) + gemsPaid
+		paid.Gems = gemsPaid
+		table.insert(parts, `+{GameConfig.FormatNumber(gemsPaid)} Gems`)
 	end
-	return table.concat(parts, " & ")
+	return table.concat(parts, " & "), paid
 end
 
 function QuestLogic.CanClaimLineQuest(profile: any): boolean
@@ -201,7 +210,7 @@ function QuestLogic.CanClaimLineQuest(profile: any): boolean
 	return (profile.QuestLineProgress or 0) >= def.Target
 end
 
-function QuestLogic.ClaimLineQuest(profile: any): (boolean, string, GameConfig.QuestReward?)
+function QuestLogic.ClaimLineQuest(profile: any, gemMultiplier: number?): (boolean, string, GameConfig.QuestReward?)
 	local stepIdx = profile.QuestLineStep or 1
 	local def = GameConfig.Quests.Line[stepIdx]
 	if not def then
@@ -212,11 +221,11 @@ function QuestLogic.ClaimLineQuest(profile: any): (boolean, string, GameConfig.Q
 		return false, "Quest is not complete yet!", nil
 	end
 
-	local rewardStr = payQuestReward(profile, def.Reward)
+	local rewardStr, paid = payQuestReward(profile, def.Reward, gemMultiplier)
 	profile.QuestLineStep = stepIdx + 1
 	profile.QuestLineProgress = 0
 	QuestLogic.SyncSnapshotProgress(profile)
-	return true, `Quest Complete: {def.Title} ({rewardStr})!`, def.Reward
+	return true, `Quest Complete: {def.Title} ({rewardStr})!`, paid
 end
 
 function QuestLogic.CanClaimDailyQuest(profile: any, index: number): boolean
@@ -235,7 +244,11 @@ function QuestLogic.CanClaimDailyQuest(profile: any, index: number): boolean
 	return (slot.Progress or 0) >= def.Target
 end
 
-function QuestLogic.ClaimDailyQuest(profile: any, index: number): (boolean, string, GameConfig.QuestReward?)
+function QuestLogic.ClaimDailyQuest(
+	profile: any,
+	index: number,
+	gemMultiplier: number?
+): (boolean, string, GameConfig.QuestReward?)
 	local list = profile.DailyQuests
 	if type(list) ~= "table" then
 		return false, "No daily quests available", nil
@@ -256,8 +269,8 @@ function QuestLogic.ClaimDailyQuest(profile: any, index: number): (boolean, stri
 	end
 
 	slot.Claimed = true
-	local rewardStr = payQuestReward(profile, def.Reward)
-	return true, `Daily Quest Complete: {def.Title} ({rewardStr})!`, def.Reward
+	local rewardStr, paid = payQuestReward(profile, def.Reward, gemMultiplier)
+	return true, `Daily Quest Complete: {def.Title} ({rewardStr})!`, paid
 end
 
 function QuestLogic.HasAnyClaimableQuest(profile: any): boolean

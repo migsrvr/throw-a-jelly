@@ -9,6 +9,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared:WaitForChild("GameConfig"))
+local ProgressionLogic = require(Shared:WaitForChild("ProgressionLogic"))
 local SlimeFactory = require(Shared:WaitForChild("SlimeFactory"))
 local UiKit = require(Shared:WaitForChild("UiKit"))
 local UiLayout = require(Shared:WaitForChild("UiLayout"))
@@ -20,6 +21,8 @@ export type SlimesWindowContext = {
 	GetFreeSlot: () -> number?,
 	OnPlace: (uid: string, slot: number) -> (),
 	OnAutoPlace: () -> (),
+	OnSell: (uid: string) -> (),
+	OnSellAll: () -> (),
 }
 
 export type SlimesWindowHandle = {
@@ -47,7 +50,7 @@ function SlimesWindow.Build(parent: Instance, ctx: SlimesWindowContext): SlimesW
 		Name = "SlimesModal",
 		Parent = parent,
 		Title = "My Slimes",
-		Size = UDim2.fromOffset(600, 540),
+		Size = UDim2.fromOffset(680, 540),
 		Position = UDim2.fromScale(0.5, 0.52),
 		Header = {
 			Light = Color3.fromRGB(255, 122, 234),
@@ -143,20 +146,46 @@ function SlimesWindow.Build(parent: Instance, ctx: SlimesWindowContext): SlimesW
 	emptyLabel.TextXAlignment = Enum.TextXAlignment.Center
 	emptyLabel.Visible = false
 
-	-- AUTO-PLACE BEST: orange gradient + stripes, 64 high
+	-- Bottom footer: AUTO-PLACE BEST (left) + SELL ALL (right)
+	local footer = Instance.new("Frame")
+	footer.Name = "Footer"
+	footer.AnchorPoint = Vector2.new(0.5, 1)
+	footer.Position = UDim2.new(0.5, 0, 1, -16)
+	footer.Size = UDim2.new(1, -40, 0, 64)
+	footer.BackgroundTransparency = 1
+	footer.Parent = body
+
 	local autoBtn, autoFace = UiKit.CreateGradientButton({
 		Name = "AutoPlaceBestBtn",
-		Parent = body,
-		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.new(0.5, 0, 1, -16),
-		Size = UDim2.new(1, -40, 0, 64),
+		Parent = footer,
+		Position = UDim2.fromOffset(0, 0),
+		Size = UDim2.new(0.54, -6, 1, 0),
 		Kind = "orange",
 		CornerRadius = 18,
 		Text = "AUTO-PLACE BEST",
-		TextSize = 28,
+		TextSize = 24,
 		OnClick = ctx.OnAutoPlace,
 	})
 	UiKit.AddStripes(autoFace, 18)
+
+	local hasUnplaced = false
+	local sellAllBtn, sellAllFace, sellAllLabel = UiKit.CreateGradientButton({
+		Name = "SellAllBtn",
+		Parent = footer,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.fromScale(1, 0),
+		Size = UDim2.new(0.46, -6, 1, 0),
+		Kind = "red",
+		CornerRadius = 18,
+		Text = "SELL ALL",
+		TextSize = 22,
+		OnClick = function()
+			if hasUnplaced then
+				ctx.OnSellAll()
+			end
+		end,
+	})
+	UiKit.AddStripes(sellAllFace, 18)
 
 	local lastSignature = ""
 	local lastState: any = nil
@@ -173,6 +202,16 @@ function SlimesWindow.Build(parent: Instance, ctx: SlimesWindowContext): SlimesW
 		end
 		local maxSlimes = state.MaxSlimes or 8
 		local plotFull = ctx.GetFreeSlot() == nil
+
+		local totalSellValue = 0
+		for _, inst in unplaced do
+			totalSellValue += ProgressionLogic.GetSlimeSellPrice(inst)
+		end
+		hasUnplaced = #unplaced > 0
+		if sellAllLabel then
+			sellAllLabel.Text = if hasUnplaced then `SELL ALL (${GameConfig.FormatNumber(totalSellValue)})` else "SELL ALL"
+		end
+		UiKit.SetButtonTone(sellAllBtn, if hasUnplaced then UiKit.Gradients.Red else UiKit.Gradients.Grey, if hasUnplaced then 0 else 0.35)
 
 		plotLabel.Text = `{placedCount}/{maxSlimes}`
 		countLabel.Text = `IN YOUR BACKPACK {#unplaced}`
@@ -205,6 +244,7 @@ function SlimesWindow.Build(parent: Instance, ctx: SlimesWindowContext): SlimesW
 			local inst = unplaced[idx]
 			local def = GameConfig.SlimesById[inst.SlimeId] or GameConfig.Slimes[1]
 			local rarityColor = SlimeFactory.GetRarityColor(def.Rarity)
+			local sellPrice = ProgressionLogic.GetSlimeSellPrice(inst)
 
 			local row = Instance.new("Frame")
 			row.Name = "SlimeRow_" .. inst.Uid
@@ -236,7 +276,7 @@ function SlimesWindow.Build(parent: Instance, ctx: SlimesWindowContext): SlimesW
 
 			local word = makeLabel(row, 14, if inst.Mutation ~= "NORMAL" then inst.Mutation else def.Rarity)
 			word.Position = UDim2.fromOffset(88, 8)
-			word.Size = UDim2.fromOffset(220, 18)
+			word.Size = UDim2.fromOffset(250, 18)
 			if inst.Mutation ~= "NORMAL" then
 				UiKit.ApplyTri(word, UiKit.TriFromColor(SlimeFactory.GetMutationColor(inst.Mutation), 0.5, 0.2))
 			else
@@ -244,24 +284,48 @@ function SlimesWindow.Build(parent: Instance, ctx: SlimesWindowContext): SlimesW
 			end
 			local name = makeLabel(row, 24, inst.Name)
 			name.Position = UDim2.fromOffset(88, 24)
-			name.Size = UDim2.fromOffset(250, 30)
+			name.Size = UDim2.fromOffset(265, 30)
 			name.TextTruncate = Enum.TextTruncate.AtEnd
 			local income = makeLabel(row, 19, `${GameConfig.FormatNumber(inst.IncomePerSec)}/s`)
 			income.Position = UDim2.fromOffset(88, 54)
-			income.Size = UDim2.fromOffset(200, 24)
+			income.Size = UDim2.fromOffset(220, 24)
 			UiKit.ApplyTri(income, UiKit.Gradients.Cash)
 
 			local uid = inst.Uid
+			local _, sellFace = UiKit.CreateGradientButton({
+				Name = "SellBtn",
+				Parent = row,
+				AnchorPoint = Vector2.new(1, 0.5),
+				Position = UDim2.new(1, -138, 0.5, 0),
+				Size = UDim2.fromOffset(116, 56),
+				Kind = "red",
+				CornerRadius = 14,
+				OnClick = function()
+					ctx.OnSell(uid)
+				end,
+			})
+			local sellTop = makeLabel(sellFace, 14, "SELL")
+			sellTop.Position = UDim2.fromOffset(0, 4)
+			sellTop.Size = UDim2.new(1, 0, 0, 18)
+			sellTop.TextXAlignment = Enum.TextXAlignment.Center
+			sellTop.ZIndex = 3
+			local sellVal = makeLabel(sellFace, 20, `${GameConfig.FormatNumber(sellPrice)}`)
+			sellVal.Position = UDim2.fromOffset(0, 20)
+			sellVal.Size = UDim2.new(1, 0, 0, 26)
+			sellVal.TextXAlignment = Enum.TextXAlignment.Center
+			sellVal.ZIndex = 3
+			UiKit.ApplyTri(sellVal, UiKit.Gradients.Cash)
+
 			UiKit.CreateGradientButton({
 				Name = "PlaceBtn",
 				Parent = row,
 				AnchorPoint = Vector2.new(1, 0.5),
 				Position = UDim2.new(1, -12, 0.5, 0),
-				Size = UDim2.fromOffset(120, 56),
+				Size = UDim2.fromOffset(116, 56),
 				Kind = if plotFull then "grey" else "blue",
 				CornerRadius = 14,
 				Text = if plotFull then "PLOT FULL" else "PLACE",
-				TextSize = if plotFull then 17 else 24,
+				TextSize = if plotFull then 16 else 22,
 				OnClick = function()
 					local slot = ctx.GetFreeSlot()
 					if slot then

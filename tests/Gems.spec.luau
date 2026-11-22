@@ -124,16 +124,28 @@ return function(t: any)
 			expect(#p.ProcessedReceipts).toBe(GameConfig.Robux.MaxProcessedReceipts)
 		end)
 
-		it("applies owned Robux Game Passes to Luck and Cash multipliers", function()
+		it("applies owned Robux Game Passes to Luck, Cash, Gems, Power, Slots, and Auto-Throw", function()
 			local p = ProgressionLogic.CreateInitialProfile()
 			expect(ProgressionLogic.GetBoostLuckMultiplier(p)).toBe(1)
 			expect(ProgressionLogic.GetPassCashMultiplier(p)).toBe(1)
+			expect(ProgressionLogic.GetGemMultiplier(p)).toBe(1)
+			expect(ProgressionLogic.GetTrainingPowerMultiplier(p)).toBe(1)
 
 			p.OwnedPasses.pass_x2_luck = true
 			p.OwnedPasses.pass_x2_cash = true
 			p.OwnedPasses.pass_vip = true
+			p.OwnedPasses.pass_gems_4x = true
+			p.OwnedPasses.pass_power_6x = true
+			p.OwnedPasses.pass_extra_slots = true
+			p.OwnedPasses.pass_auto_throw = true
+
 			expect(ProgressionLogic.GetBoostLuckMultiplier(p)).toBeNear(2.0)
-			expect(ProgressionLogic.GetPassCashMultiplier(p)).toBeNear(2.2)
+			expect(ProgressionLogic.GetPassCashMultiplier(p)).toBeNear(2.5)
+			expect(ProgressionLogic.GetCashMultiplier(p)).toBeNear(2.5)
+			expect(ProgressionLogic.GetGemMultiplier(p)).toBeNear(5.0) -- 4x Gems * 1.25 VIP
+			expect(ProgressionLogic.GetTrainingPowerMultiplier(p)).toBeNear(6.0)
+			expect(ProgressionLogic.GetEffectiveMaxSlimes(p)).toBe(12)
+			expect(ProgressionLogic.OwnsAutoThrow(p)).toBe(true)
 		end)
 
 		it("keeps paying the last daily value after the streak passes the table length", function()
@@ -206,25 +218,91 @@ return function(t: any)
 			expect(p.Gems).toBe(5)
 		end)
 
-		it("Lucky Charm multiplies throw luck", function()
+		it("upgrades tiered 2x-10x Gems, Training Power, Luck, and 2x Money cleanly with highest-tier-wins", function()
 			local p = ProgressionLogic.CreateInitialProfile()
+			expect(ProgressionLogic.GetGemMultiplier(p)).toBe(1)
+			expect(ProgressionLogic.GetTrainingPowerMultiplier(p)).toBe(1)
 			expect(ProgressionLogic.GetBoostLuckMultiplier(p)).toBe(1)
-			p.Gems = GameConfig.ShopBoosts.lucky_charm.Cost
-			expect(ProgressionLogic.Purchase(p, "gem_lucky_charm", 1)).toBe(true)
-			expect(ProgressionLogic.GetBoostLuckMultiplier(p)).toBeNear(GameConfig.ShopBoosts.lucky_charm.LuckMultiplier or 0)
-			expect(p.Gems).toBe(0)
+			expect(ProgressionLogic.GetCashMultiplier(p)).toBe(1)
+
+			-- Step through the full 2x -> 4x -> 6x -> 8x -> 10x Luck ladder via Gems
+			local luckTrack = GameConfig.MultiplierTracksById.luck
+			for _, tier in luckTrack.Tiers do
+				local entry = ProgressionLogic.GetShopListingEntry(p, "gem_luck_tier")
+				expect(entry ~= nil and entry.Price).toBe(tier.GemCost)
+				p.Gems = tier.GemCost
+				expect((ProgressionLogic.Purchase(p, "gem_luck_tier", 1))).toBe(true)
+				expect(p.Gems).toBe(0)
+				expect(ProgressionLogic.GetBoostLuckMultiplier(p)).toBe(tier.Multiplier)
+			end
+			expect(ProgressionLogic.GetShopListingEntry(p, "gem_luck_tier").State).toBe("Maxed")
+			p.Gems = 99999
+			expect((ProgressionLogic.Purchase(p, "gem_luck_tier", 1))).toBe(false)
+
+			-- Owning the 4x Gems Robux Pass jumps the Gem ladder straight to 6x next (no double-charging)
+			local p2 = ProgressionLogic.CreateInitialProfile()
+			p2.OwnedPasses.pass_gems_4x = true
+			expect(ProgressionLogic.GetGemMultiplier(p2)).toBe(4)
+			local nextEntry = ProgressionLogic.GetShopListingEntry(p2, "gem_gems_tier")
+			expect(nextEntry ~= nil and nextEntry.Title).toBe("6x Gems")
+			-- Verify 4x Gems multiplies in-game earned Gems (zone + daily) but NOT Robux Gem Packs
+			local z1Paid = ProgressionLogic.AwardZoneReach(p2, 1)
+			expect(z1Paid).toBe(GameConfig.Gems.FirstZoneReach[1] * 4)
+			local _, dailyPaid = ProgressionLogic.ClaimDailyReward(p2, 100)
+			expect(dailyPaid).toBe(GameConfig.Gems.DailyRewards[1] * 4)
+			local pack = GameConfig.Robux.GemPacks[1]
+			local _, packPaid = ProgressionLogic.GrantRobuxGemPack(p2, pack.Id, "rcpt_no_mult")
+			expect(packPaid).toBe(pack.Gems) -- Robux packs never get multiplied
+
+			-- Training Power 6x multiplies pull-up XP by 6x
+			local p3 = ProgressionLogic.CreateInitialProfile()
+			p3.OwnedBoosts.power_6x = true
+			expect(ProgressionLogic.ApplyPullUpRep(p3).XPGained).toBe(GameConfig.PullUpTiers[1].XPPerRep * 6)
+
+			-- 2x Money doubles passive income
+			local p4 = ProgressionLogic.CreateInitialProfile()
+			local baseIncome = ProgressionLogic.GetIncomePerSecond(p4)
+			p4.Gems = GameConfig.MultiplierTracksById.money.Tiers[1].GemCost
+			expect((ProgressionLogic.Purchase(p4, "gem_money_2x", 1))).toBe(true)
+			expect(ProgressionLogic.GetIncomePerSecond(p4)).toBe(baseIncome * 2)
+			expect(ProgressionLogic.GetShopListingEntry(p4, "gem_money_2x").State).toBe("Maxed")
 		end)
 
-		it("unlocks the +4 slots with Gems, which also maxes the Cash version", function()
+		it("unlocks locked Plot Slots 9..12 one-by-one with Gems and maxes via +4 Plot Slots Pass", function()
 			local p = ProgressionLogic.CreateInitialProfile()
 			p.Cash = 1e9
-			p.Gems = GameConfig.Slots.ExpansionGemCost
-			expect(ProgressionLogic.Purchase(p, "gem_slot_expansion", 1)).toBe(true)
-			expect(p.MaxSlimes).toBe(GameConfig.Slots.ExpandedMaxSlimes)
+			local cost9 = GameConfig.Slots.SlotUnlockGemCosts[9]
+			p.Gems = cost9
+			expect((ProgressionLogic.Purchase(p, "gem_slot_unlock", 1))).toBe(true)
+			expect(p.MaxSlimes).toBe(9)
 			expect(p.Gems).toBe(0)
 			expect(p.Cash).toBe(1e9)
-			expect(ProgressionLogic.Purchase(p, "slot_expansion", 1)).toBe(false)
-			expect(ProgressionLogic.GetShopListingEntry(p, "slot_expansion").State).toBe("Maxed")
+			expect(ProgressionLogic.GetShopListingEntry(p, "gem_slot_unlock").Title).toBe("Unlock Plot Slot #10")
+
+			-- Owning the "+4 Plot Slots" Robux Pass immediately maxes Slots to 12/12
+			p.OwnedPasses.pass_extra_slots = true
+			expect(ProgressionLogic.GetEffectiveMaxSlimes(p)).toBe(12)
+			expect(ProgressionLogic.GetShopListingEntry(p, "gem_slot_unlock").State).toBe("Maxed")
+			p.Gems = 99999
+			expect((ProgressionLogic.Purchase(p, "gem_slot_unlock", 1))).toBe(false)
+		end)
+
+		it("enforces the 8+ hour F2P Gem grind floor (all one-time milestones + Day 1 stay below cheapest Gem unlock)", function()
+			local oneTimeTotal = 0
+			for _, g in GameConfig.Gems.FirstZoneReach do
+				oneTimeTotal += g
+			end
+			for _, m in GameConfig.Gems.IndexMilestones do
+				oneTimeTotal += m.Gems
+			end
+			for _, q in GameConfig.Quests.Line do
+				oneTimeTotal += (q.Reward.Gems or 0)
+			end
+			oneTimeTotal += GameConfig.Gems.DailyRewards[1]
+
+			local cheapestGemUnlock = GameConfig.Slots.SlotUnlockGemCosts[9]
+			expect(oneTimeTotal < cheapestGemUnlock).toBe(true)
+			expect(cheapestGemUnlock).toBeGreaterThanOrEqual(1500)
 		end)
 
 		it("lists gem items in the Gems wallet: price text and affordability", function()
@@ -237,7 +315,7 @@ return function(t: any)
 				expect(entry.State).toBe("Unaffordable") -- lots of Cash doesn't help
 				expect(entry.Options[1].CanAfford).toBe(false)
 			end
-			local cashEntry = ProgressionLogic.GetShopListingEntry(state, "boost_double_cash")
+			local cashEntry = ProgressionLogic.GetShopListingEntry(state, "pullup_tier")
 			if cashEntry then
 				expect(cashEntry.PriceKind).toBe("Cash")
 				expect(cashEntry.State).toBe("Available")

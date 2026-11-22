@@ -57,6 +57,8 @@ export type MutationDef = {
 export type MeterSegmentDef = {
 	Index: number,
 	Color: RGB,
+	QualityLabel: string,
+	ChargeRatio: number,
 	BonusPower: number,
 	LuckMultiplier: number,
 	IsPerfect: boolean?, -- top band: "PERFECT!" callout
@@ -78,16 +80,47 @@ export type PullUpTierDef = {
 	SpeedMult: number, -- multiplies pull-up rep speed (see GameConfig.PullUp)
 }
 
-export type ShopAction = "PowerUpgrade" | "PullUpTier" | "BaitTier" | "SlotExpansion" | "Boost" | "Egg" | "FreeGift"
+export type ShopAction =
+	"PowerUpgrade"
+	| "PullUpTier"
+	| "BaitTier"
+	| "SlotExpansion"
+	| "Boost"
+	| "MultiplierTier"
+	| "Egg"
+	| "FreeGift"
 
 -- Which wallet a shop item is paid from. Featured Eggs use "Robux" (Developer Products).
 export type PriceKind = "Cash" | "Gems" | "Robux"
+
+export type MultiplierTrackId = "gems" | "power" | "luck" | "money"
+
+export type MultiplierTierDef = {
+	Tier: number,
+	Multiplier: number,
+	BoostId: string,
+	PassId: string,
+	Name: string,
+	Description: string,
+	GemCost: number,
+	RobuxPrice: number,
+	Color: RGB,
+}
+
+export type MultiplierTrackDef = {
+	Id: MultiplierTrackId,
+	Name: string,
+	ShortStat: string,
+	Icon: string,
+	Color: RGB,
+	Tiers: { MultiplierTierDef },
+}
 
 export type ShopCatalogItem = {
 	Id: string,
 	Category: "Upgrade" | "Boost" | "Egg" | "Gift" | "Gem",
 	Action: ShopAction,
-	Args: { BoostId: string?, EggId: string? },
+	Args: { BoostId: string?, EggId: string?, TrackId: string? },
 	Icon: string,
 	Color: RGB,
 	PriceKind: PriceKind,
@@ -101,6 +134,9 @@ export type ShopBoostDef = {
 	PriceKind: PriceKind,
 	Color: RGB,
 	LuckMultiplier: number?, -- luck boosts: multiplies every throw's luck
+	TrackId: MultiplierTrackId?,
+	Tier: number?,
+	Multiplier: number?,
 }
 
 export type ShopEggItem = {
@@ -170,8 +206,15 @@ export type RobuxPassDef = {
 	PassId: number,
 	Icon: string,
 	Color: RGB,
+	Category: ("Core" | "Luck" | "Gems" | "Power")?,
+	TrackId: MultiplierTrackId?,
+	Tier: number?,
 	LuckMultiplier: number?,
 	CashMultiplier: number?,
+	GemMultiplier: number?,
+	PowerMultiplier: number?,
+	UnlocksExtraSlots: boolean?,
+	UnlocksAutoThrow: boolean?,
 	ChatTag: string?,
 }
 
@@ -186,60 +229,97 @@ GameConfig.Hub = {
 }
 
 GameConfig.Physics = {
-	Gravity = 90.0,
+	Gravity = 140.0,
 	FixedDt = 1 / 60,
 	MaxSimSeconds = 12.0,
-	Restitution = 0.56,
+	Restitution = 0.28,
 	WallRestitution = 0.72,
 	GateRestitution = 0.45,
 	BounceThresholdVy = 8.0,
-	MaxBounces = 6,
-	RollingFriction = 22.0,
-	AirDrag = 0.04,
+	MaxBounces = 2,
+	BounceHorizDamping = 0.18,
+	RollingFriction = 200.0,
+	AirDrag = 0.008,
 	StopSpeedThreshold = 1.5,
 	MinPitchDeg = 18.0,
 	MaxPitchDeg = 55.0,
-	DefaultPitchDeg = 36.0,
+	DefaultPitchDeg = 40.0,
 	MaxYawDeg = 18.0,
 	BaseLaunchSpeed = 38.0,
 	PowerSpeedScale = 14.5,
 	PowerExponent = 0.42,
+	MeterChargeMin = 0.60, -- Band 1 minimum charge ratio (Band 9 PERFECT = 1.00)
+	-- Calibrated ThrowPower -> Max LaunchSpeed knots aligned to Zone 1..5 StartZ/EndZ boundaries
+	-- with solid vertical cliff collisions and sticky jelly bounces so throws land directly on target terrain.
+	PowerSpeedKnots = {
+		{ Power = 1, Speed = 91.0 },
+		{ Power = 5, Speed = 110.0 },
+		{ Power = 49, Speed = 164.5 },
+		{ Power = 50, Speed = 182.5 },
+		{ Power = 249, Speed = 245.5 },
+		{ Power = 250, Speed = 259.0 },
+		{ Power = 999, Speed = 307.5 },
+		{ Power = 1000, Speed = 320.5 },
+		{ Power = 4999, Speed = 358.5 },
+		{ Power = 5000, Speed = 374.0 },
+		{ Power = 25000, Speed = 403.5 },
+	},
 }
 
+-- Plot Slime Slots: new players strictly cap at 8 slots; Slots 9..12 are locked behind
+-- 1-by-1 high-value Gem unlocks (8+ hr F2P grind) OR the "+4 Plot Slots" Robux Game Pass.
 GameConfig.Slots = {
 	InitialMaxSlimes = 8,
 	ExpandedMaxSlimes = 12,
 	TotalSlotParts = 12,
-	ExpansionCost = 5000,
-	ExpansionGemCost = 60, -- the same +4 slots, bought with Gems instead of Cash
+	SlotUnlockGemCosts = {
+		[9] = 1500,
+		[10] = 2500,
+		[11] = 4000,
+		[12] = 6000,
+	} :: { [number]: number },
 }
 
--- Gems: the premium currency. Earned slowly in-game (Index milestones, first time reaching each zone,
--- daily login streak, rare slime catches) and spent on convenience upgrades (Auto-Throw, Lucky Charm,
--- extra slots). Robux gem packs are planned but not built (they need real developer product ids).
+function GameConfig.GetNextSlotGemCost(currentMaxSlimes: number): number?
+	local nextSlot = math.floor(currentMaxSlimes) + 1
+	return GameConfig.Slots.SlotUnlockGemCosts[nextSlot]
+end
+
+GameConfig.Sell = {
+	IncomeSecondsMultiplier = 15, -- sells for 15 seconds of that slime's IncomePerSec (mutations included)
+	MinSellPrice = 10,
+}
+
+-- Gems: the premium currency (see docs/docs/ECONOMY-BASELINE.md).
+-- Calibrated so active F2P players accumulate ~1,250 Gems in their first 8 hours, making the
+-- cheapest high-value Gem unlock (1,500+ Gems) an authentic 8+ hour grind OR a Robux shortcut.
 GameConfig.Gems = {
-	-- Paid once each, the first time the Slime Index reaches this many discovered slimes
+	-- Paid once each, the first time the Slime Index reaches this many discovered slimes (total 177 base)
 	IndexMilestones = {
-		{ Discovered = 3, Gems = 10 },
-		{ Discovered = 6, Gems = 15 },
+		{ Discovered = 3, Gems = 5 },
+		{ Discovered = 6, Gems = 12 },
 		{ Discovered = 9, Gems = 25 },
-		{ Discovered = 12, Gems = 40 },
-		{ Discovered = 15, Gems = 75 },
+		{ Discovered = 12, Gems = 45 },
+		{ Discovered = 15, Gems = 90 },
 	},
-	-- Zone index -> Gems paid the first time a throw lands in that zone (reaching zone N pays every zone up to N)
-	FirstZoneReach = { 5, 15, 30, 50, 80 },
-	-- Daily login streak: day 1..7 reward; day 8+ keeps paying the last value. Missing a day resets to day 1.
-	DailyRewards = { 5, 8, 10, 12, 15, 20, 35 },
+	-- Zone index -> base Gems paid the first time a throw lands in that zone (total 139 base)
+	FirstZoneReach = { 3, 8, 18, 35, 75 },
+	-- Daily login streak: day 1..7 base reward; day 8+ keeps paying the last value. Missing a day resets to day 1.
+	DailyRewards = { 5, 8, 12, 16, 22, 30, 50 },
 	SecondsPerDay = 86400, -- days are counted in UTC from os.time()
-	-- Rare catches from throws (eggs don't pay, so Cash can't be turned straight into Gems)
-	RarityDrops = { Legendary = 3, Mythic = 8 } :: { [string]: number },
-	MutationDrops = { CRYSTAL = 3, RAINBOW = 6 } :: { [string]: number },
+	-- Repeatable catch drops from throws (eggs don't pay, so Cash can't be turned into Gems)
+	RarityDrops = { Mythic = 1 } :: { [string]: number },
+	MutationDrops = { CRYSTAL = 1, RAINBOW = 2 } :: { [string]: number },
 }
 
 -- Auto-Throw (bought with Gems): throws by itself whenever you stand idle at the throw line.
--- It always stops the meter at MeterRatio, so a timed PERFECT by hand stays better.
+-- Uses a server-side shuffled 5-throw bag: 3 PERFECT (Band 9) + 2 GOOD (Band 8) every 5 throws.
 GameConfig.AutoThrow = {
-	MeterRatio = 0.5, -- band 5 (+9 power, 1.15x luck)
+	MeterRatio = 0.82, -- fallback GOOD band ratio (Band 8, 1.48x luck)
+	PerfectMeterRatio = 1.0, -- Band 9 (PERFECT!, 1.75x luck, 100% reach)
+	GoodMeterRatio = 0.82, -- Band 8 (GOOD!, 1.48x luck, ~92% reach)
+	BagPerfectCount = 3,
+	BagGoodCount = 2,
 	IdleDelaySeconds = 0.8, -- wait this long at the throw line before each auto throw
 }
 
@@ -264,18 +344,18 @@ GameConfig.Save = {
 	RetryDelaySeconds = 1.5,
 }
 
--- 9-Segment Vertical Throw Meter (bottom segment 1 = Red -> top segment 9 = Bright Green).
--- Bonus Throw Power runs 0-20; stopping in the top band is a "PERFECT!" (+20).
+-- 9-Segment Vertical Throw Meter baseline (bottom segment 1 = Red -> top segment 9 = Bright Green).
+-- Every segment defines its exact QualityLabel, ChargeRatio (60%-100% throw distance), BonusPower, and LuckMultiplier.
 GameConfig.MeterSegments = {
-	{ Index = 1, Color = { 235, 65, 55 }, BonusPower = 1, LuckMultiplier = 1.00 },
-	{ Index = 2, Color = { 245, 105, 50 }, BonusPower = 3, LuckMultiplier = 1.03 },
-	{ Index = 3, Color = { 250, 145, 50 }, BonusPower = 5, LuckMultiplier = 1.06 },
-	{ Index = 4, Color = { 255, 185, 55 }, BonusPower = 7, LuckMultiplier = 1.10 },
-	{ Index = 5, Color = { 245, 220, 60 }, BonusPower = 9, LuckMultiplier = 1.15 },
-	{ Index = 6, Color = { 205, 235, 65 }, BonusPower = 12, LuckMultiplier = 1.22 },
-	{ Index = 7, Color = { 160, 240, 75 }, BonusPower = 14, LuckMultiplier = 1.32 },
-	{ Index = 8, Color = { 115, 245, 85 }, BonusPower = 17, LuckMultiplier = 1.48 },
-	{ Index = 9, Color = { 70, 250, 105 }, BonusPower = 20, LuckMultiplier = 1.75, IsPerfect = true },
+	{ Index = 1, Color = { 235, 65, 55 }, QualityLabel = "WEAK", ChargeRatio = 0.60, BonusPower = 1, LuckMultiplier = 1.00 },
+	{ Index = 2, Color = { 245, 105, 50 }, QualityLabel = "WEAK", ChargeRatio = 0.65, BonusPower = 3, LuckMultiplier = 1.03 },
+	{ Index = 3, Color = { 250, 145, 50 }, QualityLabel = "LOW", ChargeRatio = 0.70, BonusPower = 5, LuckMultiplier = 1.06 },
+	{ Index = 4, Color = { 255, 185, 55 }, QualityLabel = "OK", ChargeRatio = 0.75, BonusPower = 7, LuckMultiplier = 1.10 },
+	{ Index = 5, Color = { 245, 220, 60 }, QualityLabel = "OK", ChargeRatio = 0.80, BonusPower = 9, LuckMultiplier = 1.15 },
+	{ Index = 6, Color = { 205, 235, 65 }, QualityLabel = "GOOD", ChargeRatio = 0.85, BonusPower = 12, LuckMultiplier = 1.22 },
+	{ Index = 7, Color = { 160, 240, 75 }, QualityLabel = "GOOD!", ChargeRatio = 0.90, BonusPower = 14, LuckMultiplier = 1.32 },
+	{ Index = 8, Color = { 115, 245, 85 }, QualityLabel = "GREAT!", ChargeRatio = 0.95, BonusPower = 17, LuckMultiplier = 1.48 },
+	{ Index = 9, Color = { 70, 250, 105 }, QualityLabel = "PERFECT!", ChargeRatio = 1.00, BonusPower = 20, LuckMultiplier = 1.75, IsPerfect = true },
 } :: { MeterSegmentDef }
 
 -- Live flight luck: distance down the lane x meter band luck x bait quality.
@@ -289,13 +369,13 @@ function GameConfig.ComputeFlightLuck(distanceStuds: number, meterLuck: number, 
 	return distMult * math.max(1.0, meterLuck) * math.max(1.0, baitLuck)
 end
 
--- Jelly Bait quality tiers (bought in the Shop): multiplies rarity & mutation luck inside the zone you reach.
+-- Jelly Bait quality tiers (bought with Cash in Upgrades): multiplies rarity & mutation luck on every throw.
 GameConfig.BaitTiers = {
 	{ Tier = 1, Name = "Carrot Jelly", Cost = 0, LuckMultiplier = 1.00, Color = { 255, 125, 40 } },
-	{ Tier = 2, Name = "Berry Jelly", Cost = 150, LuckMultiplier = 1.35, Color = { 200, 70, 160 } },
-	{ Tier = 3, Name = "Crystal Honey", Cost = 900, LuckMultiplier = 1.85, Color = { 255, 205, 70 } },
-	{ Tier = 4, Name = "Magma Tart", Cost = 4500, LuckMultiplier = 2.60, Color = { 255, 95, 45 } },
-	{ Tier = 5, Name = "Starlight Cake", Cost = 22000, LuckMultiplier = 4.00, Color = { 170, 150, 255 } },
+	{ Tier = 2, Name = "Berry Jelly", Cost = 600, LuckMultiplier = 1.35, Color = { 200, 70, 160 } },
+	{ Tier = 3, Name = "Crystal Honey", Cost = 8000, LuckMultiplier = 1.85, Color = { 255, 205, 70 } },
+	{ Tier = 4, Name = "Magma Tart", Cost = 120000, LuckMultiplier = 2.60, Color = { 255, 95, 45 } },
+	{ Tier = 5, Name = "Starlight Cake", Cost = 2000000, LuckMultiplier = 4.00, Color = { 170, 150, 255 } },
 } :: { BaitTierDef }
 
 -- Strength levels: pull-up reps give Training XP; every level up gives +PowerPerLevel Throw Power.
@@ -723,10 +803,10 @@ end
 
 GameConfig.PullUpTiers = {
 	{ Tier = 1, Name = "PULL-UP BAR", Cost = 0, XPPerRep = 2, SpeedMult = 1.0 },
-	{ Tier = 2, Name = "IRON BAR", Cost = 75, XPPerRep = 8, SpeedMult = 1.15 },
-	{ Tier = 3, Name = "CRYSTAL BAR", Cost = 450, XPPerRep = 32, SpeedMult = 1.3 },
-	{ Tier = 4, Name = "MAGMA BAR", Cost = 2500, XPPerRep = 140, SpeedMult = 1.5 },
-	{ Tier = 5, Name = "STARLIGHT BAR", Cost = 15000, XPPerRep = 600, SpeedMult = 1.75 },
+	{ Tier = 2, Name = "IRON BAR", Cost = 350, XPPerRep = 8, SpeedMult = 1.15 },
+	{ Tier = 3, Name = "CRYSTAL BAR", Cost = 4500, XPPerRep = 32, SpeedMult = 1.3 },
+	{ Tier = 4, Name = "MAGMA BAR", Cost = 75000, XPPerRep = 140, SpeedMult = 1.5 },
+	{ Tier = 5, Name = "STARLIGHT BAR", Cost = 1200000, XPPerRep = 600, SpeedMult = 1.75 },
 } :: { PullUpTierDef }
 
 -- Pull-up loop tuning. Rep time shrinks with strength (BaseThrowPower) and bar tier SpeedMult:
@@ -827,72 +907,126 @@ for _, egg in GameConfig.ShopEggs do
 	end
 end
 
+-- Tiered Permanent Multipliers (buyable via high-value Gems in Upgrades OR directly with Robux Passes).
+-- Highest tier owned across Gems or Robux Passes applies (capped at 10x max; never double-charges).
+GameConfig.MultiplierTracks = {
+	{
+		Id = "gems",
+		Name = "Gems Multiplier",
+		ShortStat = "Earned Gems",
+		Icon = "gem",
+		Color = { 75, 210, 255 },
+		Tiers = {
+			{ Tier = 1, Multiplier = 2, BoostId = "gems_2x", PassId = "pass_gems_2x", Name = "2x Gems", Description = "2x Gems from catches, quests, zones & daily!", GemCost = 2500, RobuxPrice = 199, Color = { 70, 200, 255 } },
+			{ Tier = 2, Multiplier = 4, BoostId = "gems_4x", PassId = "pass_gems_4x", Name = "4x Gems", Description = "4x Gems from catches, quests, zones & daily!", GemCost = 6000, RobuxPrice = 349, Color = { 55, 175, 255 } },
+			{ Tier = 3, Multiplier = 6, BoostId = "gems_6x", PassId = "pass_gems_6x", Name = "6x Gems", Description = "6x Gems from catches, quests, zones & daily!", GemCost = 12000, RobuxPrice = 549, Color = { 105, 145, 255 } },
+			{ Tier = 4, Multiplier = 8, BoostId = "gems_8x", PassId = "pass_gems_8x", Name = "8x Gems", Description = "8x Gems from catches, quests, zones & daily!", GemCost = 22000, RobuxPrice = 799, Color = { 160, 110, 255 } },
+			{ Tier = 5, Multiplier = 10, BoostId = "gems_10x", PassId = "pass_gems_10x", Name = "10x Gems", Description = "MAX 10x Gems from every in-game source!", GemCost = 38000, RobuxPrice = 1199, Color = { 235, 100, 255 } },
+		},
+	},
+	{
+		Id = "power",
+		Name = "Training Power",
+		ShortStat = "Pull-Up XP",
+		Icon = "power",
+		Color = { 170, 105, 255 },
+		Tiers = {
+			{ Tier = 1, Multiplier = 2, BoostId = "power_2x", PassId = "pass_power_2x", Name = "2x Training Power", Description = "2x Pull-Up XP on every rep!", GemCost = 1800, RobuxPrice = 149, Color = { 165, 110, 255 } },
+			{ Tier = 2, Multiplier = 4, BoostId = "power_4x", PassId = "pass_power_4x", Name = "4x Training Power", Description = "4x Pull-Up XP on every rep!", GemCost = 4500, RobuxPrice = 299, Color = { 195, 95, 255 } },
+			{ Tier = 3, Multiplier = 6, BoostId = "power_6x", PassId = "pass_power_6x", Name = "6x Training Power", Description = "6x Pull-Up XP on every rep!", GemCost = 9500, RobuxPrice = 499, Color = { 235, 95, 215 } },
+			{ Tier = 4, Multiplier = 8, BoostId = "power_8x", PassId = "pass_power_8x", Name = "8x Training Power", Description = "8x Pull-Up XP on every rep!", GemCost = 17500, RobuxPrice = 749, Color = { 255, 110, 145 } },
+			{ Tier = 5, Multiplier = 10, BoostId = "power_10x", PassId = "pass_power_10x", Name = "10x Training Power", Description = "MAX 10x Pull-Up XP on every rep!", GemCost = 30000, RobuxPrice = 1099, Color = { 255, 150, 65 } },
+		},
+	},
+	{
+		Id = "luck",
+		Name = "Throw Luck",
+		ShortStat = "Throw Luck",
+		Icon = "clover",
+		Color = { 85, 225, 115 },
+		Tiers = {
+			{ Tier = 1, Multiplier = 2, BoostId = "luck_2x", PassId = "pass_x2_luck", Name = "2x Luck", Description = "Permanent 2x Luck on every throw!", GemCost = 2000, RobuxPrice = 179, Color = { 90, 225, 120 } },
+			{ Tier = 2, Multiplier = 4, BoostId = "luck_4x", PassId = "pass_luck_4x", Name = "4x Lucky", Description = "Permanent 4x Luck for rare & Rainbow slimes!", GemCost = 5000, RobuxPrice = 349, Color = { 65, 235, 155 } },
+			{ Tier = 3, Multiplier = 6, BoostId = "luck_6x", PassId = "pass_luck_6x", Name = "6x Lucky", Description = "Permanent 6x Luck for Mythic & Rainbow rolls!", GemCost = 10500, RobuxPrice = 549, Color = { 55, 225, 210 } },
+			{ Tier = 4, Multiplier = 8, BoostId = "luck_8x", PassId = "pass_luck_8x", Name = "8x Lucky", Description = "Permanent 8x Luck on every throw!", GemCost = 19000, RobuxPrice = 799, Color = { 130, 200, 255 } },
+			{ Tier = 5, Multiplier = 10, BoostId = "luck_10x", PassId = "pass_luck_10x", Name = "10x Luck", Description = "MAX 10x Luck on every throw!", GemCost = 32000, RobuxPrice = 1199, Color = { 255, 205, 60 } },
+		},
+	},
+	{
+		Id = "money",
+		Name = "2x Money",
+		ShortStat = "Cash Income",
+		Icon = "cash",
+		Color = { 55, 195, 250 },
+		Tiers = {
+			{ Tier = 1, Multiplier = 2, BoostId = "money_2x", PassId = "pass_x2_cash", Name = "2x Money", Description = "Permanent 2x Cash from slimes & throws!", GemCost = 2200, RobuxPrice = 199, Color = { 55, 195, 250 } },
+		},
+	},
+} :: { MultiplierTrackDef }
+
+GameConfig.MultiplierTracksById = {} :: { [string]: MultiplierTrackDef }
+for _, track in GameConfig.MultiplierTracks do
+	GameConfig.MultiplierTracksById[track.Id] = track
+end
+
 GameConfig.ShopBoosts = {
-	double_cash = {
-		Id = "double_cash",
-		Name = "x2 Cash",
-		Description = "Double cash from every slime!",
-		Cost = 500,
-		PriceKind = "Cash",
-		Color = { 65, 190, 255 },
-	},
-	double_power = {
-		Id = "double_power",
-		Name = "x2 Training Power",
-		Description = "Double XP on every pull-up!",
-		Cost = 750,
-		PriceKind = "Cash",
-		Color = { 165, 110, 255 },
-	},
 	auto_throw = {
 		Id = "auto_throw",
 		Name = "Auto-Throw",
-		Description = "Throws for you while you stand at the throw line!",
-		Cost = 150,
+		Description = "Throws automatically at the line (3 PERFECT / 2 GREAT bag)!",
+		Cost = 2000,
 		PriceKind = "Gems",
 		Color = { 80, 210, 230 },
 	},
-	lucky_charm = {
-		Id = "lucky_charm",
-		Name = "Lucky Charm",
-		Description = "x1.5 Luck on every throw!",
-		Cost = 120,
-		PriceKind = "Gems",
-		Color = { 90, 225, 120 },
-		LuckMultiplier = 1.5,
-	},
 } :: { [string]: ShopBoostDef }
 
--- Display order for boost tables (ShopBoosts is keyed by id, so it has no order of its own)
-GameConfig.ShopBoostOrder = { "double_cash", "double_power", "auto_throw", "lucky_charm" }
+GameConfig.ShopBoostOrder = { "auto_throw" }
+for _, track in GameConfig.MultiplierTracks do
+	for _, tier in track.Tiers do
+		GameConfig.ShopBoosts[tier.BoostId] = {
+			Id = tier.BoostId,
+			Name = tier.Name,
+			Description = tier.Description,
+			Cost = tier.GemCost,
+			PriceKind = "Gems",
+			Color = tier.Color,
+			LuckMultiplier = if track.Id == "luck" then tier.Multiplier else nil,
+			TrackId = track.Id,
+			Tier = tier.Tier,
+			Multiplier = tier.Multiplier,
+		}
+		table.insert(GameConfig.ShopBoostOrder, tier.BoostId)
+	end
+end
 
 GameConfig.FreeGift = {
-	SlimeId = "meadow_bloom",
+	SlimeId = "meadow_honey",
 	Mutation = "EMERALD" :: "EMERALD",
 	Title = "Free Slime!",
-	Subtitle = "Claim your free Emerald Sakura Slime!",
+	Subtitle = "Claim your free Emerald Honey Slime!",
 }
 
 --[[
 	Shop catalog: the single list of everything purchasable. Prices/names are NOT stored here;
-	they are read from the tables above (PullUpTiers, ShopEggs, ShopBoosts, Slots, GetPowerUpgradeCost)
-	by ProgressionLogic.GetShopListing, so each number lives in exactly one place.
-	Adding an item = add a row here (+ its data in the table it points to). See docs/shop-catalog.md.
+	they are read from the tables above (PullUpTiers, BaitTiers, MultiplierTracks, ShopBoosts,
+	ShopEggs, Slots, GetPowerUpgradeCost) by ProgressionLogic.GetShopListing.
+	Cash buys core progression (Power, Bars, Bait); Gems & Robux own Multipliers, Auto-Throw,
+	and locked Plot Slots 9-12. See docs/docs/ECONOMY-BASELINE.md & docs/docs/shop-catalog.md.
 ]]
 GameConfig.ShopCatalog = {
 	{ Id = "power_upgrade", Category = "Upgrade", Action = "PowerUpgrade", Args = {}, Icon = "⚡", Color = { 235, 150, 45 }, PriceKind = "Cash" },
 	{ Id = "pullup_tier", Category = "Upgrade", Action = "PullUpTier", Args = {}, Icon = "💪", Color = { 55, 155, 240 }, PriceKind = "Cash" },
 	{ Id = "bait_tier", Category = "Upgrade", Action = "BaitTier", Args = {}, Icon = "🥕", Color = { 255, 125, 40 }, PriceKind = "Cash" },
-	{ Id = "slot_expansion", Category = "Upgrade", Action = "SlotExpansion", Args = {}, Icon = "🧺", Color = { 95, 200, 120 }, PriceKind = "Cash" },
-	{ Id = "boost_double_cash", Category = "Boost", Action = "Boost", Args = { BoostId = "double_cash" }, Icon = "💵", Color = { 45, 185, 235 }, PriceKind = "Cash" },
-	{ Id = "boost_double_power", Category = "Boost", Action = "Boost", Args = { BoostId = "double_power" }, Icon = "💪", Color = { 165, 95, 245 }, PriceKind = "Cash" },
 	{ Id = "egg_enchanted", Category = "Egg", Action = "Egg", Args = { EggId = "enchanted_egg" }, Icon = "🥚", Color = { 175, 110, 255 }, PriceKind = "Robux" },
 	{ Id = "egg_rainbow", Category = "Egg", Action = "Egg", Args = { EggId = "rainbow_egg" }, Icon = "🌈", Color = { 255, 120, 200 }, PriceKind = "Robux" },
 	{ Id = "free_gift", Category = "Gift", Action = "FreeGift", Args = {}, Icon = "🎁", Color = { 255, 205, 55 }, PriceKind = "Cash" },
-	-- Gem items (PriceKind = "Gems": paid from the Gems wallet)
+	-- Premium Gem items (8+ hour F2P grind OR direct Robux Pass / Gem Packs)
+	{ Id = "gem_slot_unlock", Category = "Gem", Action = "SlotExpansion", Args = {}, Icon = "🧺", Color = { 95, 200, 120 }, PriceKind = "Gems" },
 	{ Id = "gem_auto_throw", Category = "Gem", Action = "Boost", Args = { BoostId = "auto_throw" }, Icon = "🤖", Color = { 80, 210, 230 }, PriceKind = "Gems" },
-	{ Id = "gem_lucky_charm", Category = "Gem", Action = "Boost", Args = { BoostId = "lucky_charm" }, Icon = "🍀", Color = { 90, 225, 120 }, PriceKind = "Gems" },
-	{ Id = "gem_slot_expansion", Category = "Gem", Action = "SlotExpansion", Args = {}, Icon = "🧺", Color = { 95, 200, 120 }, PriceKind = "Gems" },
+	{ Id = "gem_money_2x", Category = "Gem", Action = "MultiplierTier", Args = { TrackId = "money" }, Icon = "💵", Color = { 55, 195, 250 }, PriceKind = "Gems" },
+	{ Id = "gem_gems_tier", Category = "Gem", Action = "MultiplierTier", Args = { TrackId = "gems" }, Icon = "💎", Color = { 75, 210, 255 }, PriceKind = "Gems" },
+	{ Id = "gem_power_tier", Category = "Gem", Action = "MultiplierTier", Args = { TrackId = "power" }, Icon = "💪", Color = { 170, 105, 255 }, PriceKind = "Gems" },
+	{ Id = "gem_luck_tier", Category = "Gem", Action = "MultiplierTier", Args = { TrackId = "luck" }, Icon = "🍀", Color = { 85, 225, 115 }, PriceKind = "Gems" },
 } :: { ShopCatalogItem }
 
 GameConfig.ShopCatalogById = {} :: { [string]: ShopCatalogItem }
@@ -906,28 +1040,28 @@ end
 GameConfig.Quests = {
 	DailyCount = 3,
 	Line = {
-		{ Id = "line_throw_1", Title = "Throw Jelly Once", Event = "Throw", Target = 1, Reward = { Cash = 25, Gems = 5 } },
-		{ Id = "line_place_1", Title = "Place a Slime on Your Plot", Event = "PlaceSlime", Target = 1, Reward = { Cash = 50, Gems = 5 } },
-		{ Id = "line_reps_10", Title = "Train 10 Pull-Up Reps", Event = "PullUpRep", Target = 10, Reward = { Cash = 75, Gems = 8 } },
-		{ Id = "line_bonus_1", Title = "Tap a Bonus Rep Pop-Up", Event = "BonusRep", Target = 1, Reward = { Cash = 100, Gems = 10 } },
-		{ Id = "line_bait_2", Title = "Buy Berry Jelly Bait", Event = "BuyBait", Target = 2, MinBaitTier = 2, Reward = { Cash = 150, Gems = 10 } },
-		{ Id = "line_zone_2", Title = "Reach Crystal Cave (Zone 2)", Event = "ReachZone", Target = 2, MinZone = 2, Reward = { Cash = 250, Gems = 15 } },
-		{ Id = "line_discover_5", Title = "Discover 5 Slimes in the Index", Event = "Discover", Target = 5, Reward = { Cash = 400, Gems = 15 } },
-		{ Id = "line_perfect_1", Title = "Land a PERFECT! Throw", Event = "PerfectThrow", Target = 1, Reward = { Cash = 600, Gems = 20 } },
-		{ Id = "line_place_3", Title = "Place 3 Slimes on Your Plot", Event = "PlaceSlime", Target = 3, Reward = { Cash = 1000, Gems = 20 } },
-		{ Id = "line_zone_3", Title = "Reach Lava Fields (Zone 3)", Event = "ReachZone", Target = 3, MinZone = 3, Reward = { Cash = 2000, Gems = 30 } },
-		{ Id = "line_reps_100", Title = "Complete 100 Pull-Up Reps", Event = "PullUpRep", Target = 100, Reward = { Cash = 4000, Gems = 40 } },
-		{ Id = "line_zone_4", Title = "Reach Frost Peaks (Zone 4)", Event = "ReachZone", Target = 4, MinZone = 4, Reward = { Cash = 10000, Gems = 60 } },
+		{ Id = "line_throw_1", Title = "Throw Jelly Once", Event = "Throw", Target = 1, Reward = { Cash = 40, Gems = 3 } },
+		{ Id = "line_place_1", Title = "Place a Slime on Your Plot", Event = "PlaceSlime", Target = 1, Reward = { Cash = 75, Gems = 3 } },
+		{ Id = "line_reps_10", Title = "Train 10 Pull-Up Reps", Event = "PullUpRep", Target = 10, Reward = { Cash = 120, Gems = 5 } },
+		{ Id = "line_bonus_1", Title = "Tap a Bonus Rep Pop-Up", Event = "BonusRep", Target = 1, Reward = { Cash = 200, Gems = 5 } },
+		{ Id = "line_bait_2", Title = "Buy Berry Jelly Bait", Event = "BuyBait", Target = 2, MinBaitTier = 2, Reward = { Cash = 350, Gems = 8 } },
+		{ Id = "line_zone_2", Title = "Reach Crystal Cave (Zone 2)", Event = "ReachZone", Target = 2, MinZone = 2, Reward = { Cash = 750, Gems = 10 } },
+		{ Id = "line_discover_5", Title = "Discover 5 Slimes in the Index", Event = "Discover", Target = 5, Reward = { Cash = 1500, Gems = 12 } },
+		{ Id = "line_perfect_1", Title = "Land a PERFECT! Throw", Event = "PerfectThrow", Target = 1, Reward = { Cash = 2500, Gems = 15 } },
+		{ Id = "line_place_3", Title = "Place 3 Slimes on Your Plot", Event = "PlaceSlime", Target = 3, Reward = { Cash = 4000, Gems = 15 } },
+		{ Id = "line_zone_3", Title = "Reach Lava Fields (Zone 3)", Event = "ReachZone", Target = 3, MinZone = 3, Reward = { Cash = 12000, Gems = 20 } },
+		{ Id = "line_reps_100", Title = "Complete 100 Pull-Up Reps", Event = "PullUpRep", Target = 100, Reward = { Cash = 25000, Gems = 25 } },
+		{ Id = "line_zone_4", Title = "Reach Frost Peaks (Zone 4)", Event = "ReachZone", Target = 4, MinZone = 4, Reward = { Cash = 80000, Gems = 40 } },
 	} :: { QuestDef },
 	DailyPool = {
-		{ Id = "daily_throws_5", Title = "Throw Jelly 5 Times", Event = "Throw", Target = 5, Reward = { Gems = 8 } },
-		{ Id = "daily_throws_15", Title = "Throw Jelly 15 Times", Event = "Throw", Target = 15, Reward = { Gems = 15 } },
-		{ Id = "daily_reps_25", Title = "Do 25 Pull-Up Reps", Event = "PullUpRep", Target = 25, Reward = { Gems = 10 } },
-		{ Id = "daily_bonus_3", Title = "Hit 3 Bonus Rep Pop-Ups", Event = "BonusRep", Target = 3, Reward = { Gems = 12 } },
-		{ Id = "daily_perfect_2", Title = "Land 2 PERFECT! Throws", Event = "PerfectThrow", Target = 2, Reward = { Gems = 15 } },
-		{ Id = "daily_rare_2", Title = "Catch 2 Rare+ Slimes", Event = "CatchRarity", Target = 2, MinRarityRank = 3, Reward = { Gems = 15 } },
-		{ Id = "daily_place_2", Title = "Place 2 Slimes on Your Plot", Event = "PlaceSlime", Target = 2, Reward = { Cash = 300, Gems = 10 } },
-		{ Id = "daily_cash_500", Title = "Earn $500 Cash from Throws", Event = "EarnCash", Target = 500, Reward = { Gems = 10 } },
+		{ Id = "daily_throws_5", Title = "Throw Jelly 5 Times", Event = "Throw", Target = 5, Reward = { Gems = 5 } },
+		{ Id = "daily_throws_15", Title = "Throw Jelly 15 Times", Event = "Throw", Target = 15, Reward = { Gems = 8 } },
+		{ Id = "daily_reps_25", Title = "Do 25 Pull-Up Reps", Event = "PullUpRep", Target = 25, Reward = { Gems = 6 } },
+		{ Id = "daily_bonus_3", Title = "Hit 3 Bonus Rep Pop-Ups", Event = "BonusRep", Target = 3, Reward = { Gems = 8 } },
+		{ Id = "daily_perfect_2", Title = "Land 2 PERFECT! Throws", Event = "PerfectThrow", Target = 2, Reward = { Gems = 10 } },
+		{ Id = "daily_rare_2", Title = "Catch 2 Rare+ Slimes", Event = "CatchRarity", Target = 2, MinRarityRank = 3, Reward = { Gems = 10 } },
+		{ Id = "daily_place_2", Title = "Place 2 Slimes on Your Plot", Event = "PlaceSlime", Target = 2, Reward = { Cash = 500, Gems = 6 } },
+		{ Id = "daily_cash_500", Title = "Earn $500 Cash from Throws", Event = "EarnCash", Target = 500, Reward = { Gems = 7 } },
 	} :: { QuestDef },
 }
 
@@ -942,19 +1076,96 @@ end
 -- ============================================================================
 -- ROBUX STORE: Developer Product Gem Packs & Game Passes (ProductId / PassId = 0 until published)
 -- ============================================================================
+local robuxPasses: { RobuxPassDef } = {
+	{
+		Id = "pass_extra_slots",
+		Name = "+4 Plot Slots",
+		Description = "Instantly unlock all 4 locked plot slots (8 -> 12 Slimes)!",
+		RobuxPrice = 249,
+		PassId = 0,
+		Icon = "🧺",
+		Color = { 95, 215, 125 },
+		Category = "Core",
+		UnlocksExtraSlots = true,
+	},
+	{
+		Id = "pass_auto_throw",
+		Name = "Auto-Throw",
+		Description = "Auto-throws at the line with a 3 PERFECT / 2 GREAT bag!",
+		RobuxPrice = 199,
+		PassId = 0,
+		Icon = "🤖",
+		Color = { 80, 210, 230 },
+		Category = "Core",
+		UnlocksAutoThrow = true,
+	},
+	{
+		Id = "pass_x2_cash",
+		Name = "2x Money",
+		Description = "Permanent 2x Cash from slimes & throws!",
+		RobuxPrice = 199,
+		PassId = 0,
+		Icon = "💵",
+		Color = { 55, 195, 250 },
+		Category = "Core",
+		TrackId = "money",
+		Tier = 1,
+		CashMultiplier = 2.0,
+	},
+	{
+		Id = "pass_vip",
+		Name = "VIP",
+		Description = "+25% Cash, +25% Earned Gems & [VIP] chat tag!",
+		RobuxPrice = 299,
+		PassId = 0,
+		Icon = "👑",
+		Color = { 255, 195, 50 },
+		Category = "Core",
+		CashMultiplier = 1.25,
+		GemMultiplier = 1.25,
+		ChatTag = "[VIP]",
+	},
+}
+
+-- Append tiered Luck, Gems & Training Power Game Passes directly from MultiplierTracks (single source of truth)
+local trackPassCategory: { [string]: "Luck" | "Gems" | "Power" } = {
+	luck = "Luck",
+	gems = "Gems",
+	power = "Power",
+}
+for _, trackId in { "luck", "gems", "power" } do
+	local track = GameConfig.MultiplierTracksById[trackId]
+	if track then
+		local cat = trackPassCategory[trackId]
+		for _, tier in track.Tiers do
+			table.insert(robuxPasses, {
+				Id = tier.PassId,
+				Name = tier.Name,
+				Description = tier.Description,
+				RobuxPrice = tier.RobuxPrice,
+				PassId = 0,
+				Icon = if trackId == "luck" then "🍀" elseif trackId == "gems" then "💎" else "💪",
+				Color = tier.Color,
+				Category = cat,
+				TrackId = track.Id,
+				Tier = tier.Tier,
+				LuckMultiplier = if trackId == "luck" then tier.Multiplier else nil,
+				GemMultiplier = if trackId == "gems" then tier.Multiplier else nil,
+				PowerMultiplier = if trackId == "power" then tier.Multiplier else nil,
+			})
+		end
+	end
+end
+
 GameConfig.Robux = {
 	MaxProcessedReceipts = 50,
 	GemPacks = {
-		{ Id = "pack_100", Name = "100 Gems", Gems = 100, RobuxPrice = 25, ProductId = 0, Icon = "💎", Color = { 80, 185, 255 } },
-		{ Id = "pack_550", Name = "550 Gems", Gems = 550, RobuxPrice = 99, ProductId = 0, Icon = "💎", Color = { 65, 155, 245 }, BonusTag = "+10% Bonus" },
-		{ Id = "pack_1200", Name = "1,200 Gems", Gems = 1200, RobuxPrice = 199, ProductId = 0, Icon = "💎", Color = { 145, 95, 250 }, BonusTag = "+20% Bonus" },
-		{ Id = "pack_2600", Name = "2,600 Gems", Gems = 2600, RobuxPrice = 399, ProductId = 0, Icon = "💎", Color = { 255, 120, 210 }, BonusTag = "Best Value" },
+		{ Id = "pack_500", Name = "500 Gems", Gems = 500, RobuxPrice = 79, ProductId = 0, Icon = "💎", Color = { 80, 185, 255 } },
+		{ Id = "pack_1500", Name = "1,500 Gems", Gems = 1500, RobuxPrice = 199, ProductId = 0, Icon = "💎", Color = { 65, 155, 245 }, BonusTag = "+20% Bonus" },
+		{ Id = "pack_4000", Name = "4,000 Gems", Gems = 4000, RobuxPrice = 499, ProductId = 0, Icon = "💎", Color = { 145, 95, 250 }, BonusTag = "+30% Bonus" },
+		{ Id = "pack_10000", Name = "10,000 Gems", Gems = 10000, RobuxPrice = 999, ProductId = 0, Icon = "💎", Color = { 255, 120, 210 }, BonusTag = "Best Value" },
 	} :: { RobuxGemPackDef },
-	Passes = {
-		{ Id = "pass_x2_luck", Name = "x2 Luck", Description = "Permanent 2x Luck on every throw!", RobuxPrice = 149, PassId = 0, Icon = "🍀", Color = { 85, 225, 115 }, LuckMultiplier = 2.0 },
-		{ Id = "pass_x2_cash", Name = "x2 Cash", Description = "Permanent 2x Cash from slimes & throws!", RobuxPrice = 149, PassId = 0, Icon = "💵", Color = { 55, 190, 250 }, CashMultiplier = 2.0 },
-		{ Id = "pass_vip", Name = "VIP", Description = "+10% Cash income and [VIP] chat tag!", RobuxPrice = 249, PassId = 0, Icon = "👑", Color = { 255, 195, 50 }, CashMultiplier = 1.10, ChatTag = "[VIP]" },
-	} :: { RobuxPassDef },
+	Passes = robuxPasses,
 }
 
 GameConfig.RobuxGemPacksById = {} :: { [string]: RobuxGemPackDef }
@@ -977,7 +1188,7 @@ end
 
 function GameConfig.GetPowerUpgradeCost(currentLevel: number): number
 	local lvl = math.max(1, math.floor(currentLevel))
-	return math.floor(25 * (1.65 ^ (lvl - 1)))
+	return math.floor(60 * (1.55 ^ (lvl - 1)))
 end
 
 function GameConfig.GetPowerUpgradeBonus(level: number): number
@@ -985,7 +1196,7 @@ function GameConfig.GetPowerUpgradeBonus(level: number): number
 	if lvl <= 1 then
 		return 0
 	end
-	return math.floor(12 * ((lvl - 1) ^ 1.55))
+	return math.floor(8 * ((lvl - 1) ^ 1.55))
 end
 
 function GameConfig.FormatNumber(n: number): string

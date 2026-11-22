@@ -122,25 +122,40 @@ return function(t: any)
 			expect(ProgressionLogic.GetEffectiveThrowPower(p)).toBeGreaterThan(beforePower)
 		end)
 
-		it("expands MaxSlimes from 8 to 12 for $5,000 and prevents duplicate purchase", function()
+		it("caps new players at 8 slots, rejects Cash, and unlocks Slots 9..12 1-by-1 with Gems or all 4 via Robux Pass", function()
 			local p = ProgressionLogic.CreateInitialProfile()
 			expect(p.MaxSlimes).toBe(8)
+			expect(ProgressionLogic.GetEffectiveMaxSlimes(p)).toBe(8)
 
-			p.Cash = 4999
-			local okInsufficient = ProgressionLogic.PurchaseSlotExpansion(p)
-			expect(okInsufficient).toBe(false)
+			-- Cash can NEVER unlock extra plot slots
+			p.Cash = 1e9
+			local okCash = ProgressionLogic.PurchaseSlotExpansion(p, "Cash")
+			expect(okCash).toBe(false)
 			expect(p.MaxSlimes).toBe(8)
 
-			p.Cash = 5000
-			local okSuccess = ProgressionLogic.PurchaseSlotExpansion(p)
-			expect(okSuccess).toBe(true)
-			expect(p.Cash).toBe(0)
+			-- Unlock Slots 9, 10, 11, 12 one-by-one with Gems
+			for targetSlot = 9, 12 do
+				local cost = GameConfig.Slots.SlotUnlockGemCosts[targetSlot]
+				p.Gems = cost - 1
+				expect((ProgressionLogic.PurchaseSlotExpansion(p, "Gems"))).toBe(false)
+				expect(p.MaxSlimes).toBe(targetSlot - 1)
+
+				p.Gems = cost
+				expect((ProgressionLogic.PurchaseSlotExpansion(p, "Gems"))).toBe(true)
+				expect(p.Gems).toBe(0)
+				expect(p.MaxSlimes).toBe(targetSlot)
+			end
+
+			-- Already at 12: reject further unlocks
+			p.Gems = 99999
+			expect((ProgressionLogic.PurchaseSlotExpansion(p, "Gems"))).toBe(false)
 			expect(p.MaxSlimes).toBe(12)
 
-			p.Cash = 10000
-			local okDuplicate = ProgressionLogic.PurchaseSlotExpansion(p)
-			expect(okDuplicate).toBe(false)
-			expect(p.MaxSlimes).toBe(12)
+			-- "+4 Plot Slots" Robux Pass unlocks all 12 immediately on a fresh profile
+			local pPass = ProgressionLogic.CreateInitialProfile()
+			pPass.OwnedPasses.pass_extra_slots = true
+			expect(ProgressionLogic.GetEffectiveMaxSlimes(pPass)).toBe(12)
+			expect(ProgressionLogic.GetShopListingEntry(pPass, "gem_slot_unlock").State).toBe("Maxed")
 		end)
 	end)
 
@@ -355,24 +370,33 @@ return function(t: any)
 
 		it("reports Unaffordable / Available from cash, and FREE for the gift", function()
 			local p = ProgressionLogic.CreateInitialProfile()
-			expect(ProgressionLogic.GetShopListingEntry(p, "boost_double_cash").State).toBe("Unaffordable")
+			expect(ProgressionLogic.GetShopListingEntry(p, "pullup_tier").State).toBe("Unaffordable")
 			expect(ProgressionLogic.GetShopListingEntry(p, "free_gift").State).toBe("Available")
 			expect(ProgressionLogic.GetShopListingEntry(p, "free_gift").PriceText).toBe("FREE")
 			p.Cash = 1e6
-			expect(ProgressionLogic.GetShopListingEntry(p, "boost_double_cash").State).toBe("Available")
+			expect(ProgressionLogic.GetShopListingEntry(p, "pullup_tier").State).toBe("Available")
 		end)
 
 		it("works with the client's synced state table, not only a full profile", function()
-			local synced = { Cash = 100, PowerUpgradeLevel = 1, PullUpTier = 5, MaxSlimes = 12, OwnedBoosts = { double_cash = true }, ClaimedFreeGift = true }
+			local synced = {
+				Cash = 100,
+				Gems = 0,
+				PowerUpgradeLevel = 1,
+				PullUpTier = 5,
+				MaxSlimes = 12,
+				OwnedBoosts = { money_2x = true, auto_throw = true },
+				ClaimedFreeGift = true,
+			}
 			expect(ProgressionLogic.GetShopListingEntry(synced, "pullup_tier").State).toBe("Maxed")
-			expect(ProgressionLogic.GetShopListingEntry(synced, "slot_expansion").State).toBe("Maxed")
-			expect(ProgressionLogic.GetShopListingEntry(synced, "boost_double_cash").State).toBe("Owned")
+			expect(ProgressionLogic.GetShopListingEntry(synced, "gem_slot_unlock").State).toBe("Maxed")
+			expect(ProgressionLogic.GetShopListingEntry(synced, "gem_money_2x").State).toBe("Maxed")
+			expect(ProgressionLogic.GetShopListingEntry(synced, "gem_auto_throw").State).toBe("Owned")
 			expect(ProgressionLogic.GetShopListingEntry(synced, "free_gift").State).toBe("Claimed")
 			expect(ProgressionLogic.GetShopListingEntry(synced, "power_upgrade").State).toBe("Available")
 		end)
 
-		it("buys each upgrade/boost through Purchase and charges the listed price", function()
-			for _, id in { "power_upgrade", "pullup_tier", "bait_tier", "slot_expansion", "boost_double_cash", "boost_double_power" } do
+		it("buys each Cash core upgrade through Purchase and charges the listed price", function()
+			for _, id in { "power_upgrade", "pullup_tier", "bait_tier" } do
 				local p = ProgressionLogic.CreateInitialProfile()
 				p.Cash = 1e6
 				local price = ProgressionLogic.GetShopListingEntry(p, id).Price
@@ -424,10 +448,77 @@ return function(t: any)
 			p.Cash = 50
 			expect((ProgressionLogic.Purchase(p, "not_an_item", 1))).toBe(false)
 			expect((ProgressionLogic.Purchase(p, "egg_enchanted", 2))).toBe(false)
-			expect((ProgressionLogic.Purchase(p, "boost_double_cash", 3))).toBe(false)
+			expect((ProgressionLogic.Purchase(p, "gem_money_2x", 3))).toBe(false)
 			expect((ProgressionLogic.Purchase(p, "pullup_tier", "max"))).toBe(false)
-			expect((ProgressionLogic.Purchase(p, "boost_double_cash", 1))).toBe(false)
+			expect((ProgressionLogic.Purchase(p, "pullup_tier", 1))).toBe(false)
 			expect(p.Cash).toBe(50)
+		end)
+
+		it("rejects NaN and infinity slot indices in PlaceSlimeAtSlot and PickupSlimeFromSlot without losing slimes", function()
+			local p = ProgressionLogic.CreateInitialProfile()
+			ProgressionLogic.ClaimFreeGiftSlime(p)
+			expect(#p.UnplacedSlimes).toBe(1)
+			local uid = p.UnplacedSlimes[1].Uid
+
+			local nan = 0 / 0
+			expect((ProgressionLogic.PlaceSlimeAtSlot(p, uid, nan))).toBe(false)
+			expect((ProgressionLogic.PlaceSlimeAtSlot(p, uid, math.huge))).toBe(false)
+			expect((ProgressionLogic.PlaceSlimeAtSlot(p, uid, -math.huge))).toBe(false)
+			expect(#p.UnplacedSlimes).toBe(1)
+
+			expect((ProgressionLogic.PickupSlimeFromSlot(p, nan))).toBe(false)
+			expect((ProgressionLogic.PickupSlimeFromSlot(p, math.huge))).toBe(false)
+			expect(p.PlacedSlimesBySlot[1] ~= nil).toBe(true)
+		end)
+	end)
+
+	describe("ProgressionLogic - Slime Selling", function()
+		it("computes sell price from IncomePerSec with mutation scaling and floor", function()
+			local p = ProgressionLogic.CreateInitialProfile()
+			local normalOut = ProgressionLogic.EvaluateThrowReward(p, 100, 1, 0.1, 1.0, 0.0, true)
+			local rainbowOut = ProgressionLogic.EvaluateThrowReward(p, 100, 1, 0.1, 1.0, 0.999, true)
+			local normalPrice = ProgressionLogic.GetSlimeSellPrice(normalOut.CaughtInstance)
+			local rainbowPrice = ProgressionLogic.GetSlimeSellPrice(rainbowOut.CaughtInstance)
+			expect(normalPrice).toBeGreaterThanOrEqual(GameConfig.Sell.MinSellPrice)
+			expect(rainbowPrice).toBeGreaterThan(normalPrice)
+		end)
+
+		it("sells a single unplaced slime for Cash and rejects placed or unknown UIDs", function()
+			local p = ProgressionLogic.CreateInitialProfile()
+			local placedUid = p.PlacedSlimesBySlot[1].Uid
+			local okPlaced = ProgressionLogic.SellSlime(p, placedUid)
+			expect(okPlaced).toBe(false)
+			expect(p.Cash).toBe(0)
+
+			local _, _, giftInst = ProgressionLogic.ClaimFreeGiftSlime(p)
+			expect(giftInst).toBeTruthy()
+			local expectedPrice = ProgressionLogic.GetSlimeSellPrice(giftInst)
+			local okSell, _, paid = ProgressionLogic.SellSlime(p, giftInst.Uid)
+			expect(okSell).toBe(true)
+			expect(paid).toBe(expectedPrice)
+			expect(p.Cash).toBe(expectedPrice)
+			expect(#p.UnplacedSlimes).toBe(0)
+			-- Placed starter slime must still be on the plot
+			expect(p.PlacedSlimesBySlot[1] ~= nil).toBe(true)
+		end)
+
+		it("sells all unplaced slimes via SellAllUnplacedSlimes without touching placed slimes", function()
+			local p = ProgressionLogic.CreateInitialProfile()
+			expect((ProgressionLogic.SellAllUnplacedSlimes(p))).toBe(false)
+
+			local o1 = ProgressionLogic.EvaluateThrowReward(p, 100, 1, 0.1, 1.0, 0.0, true)
+			local o2 = ProgressionLogic.EvaluateThrowReward(p, 200, 1, 0.95, 1.0, 0.0, true)
+			local expectedTotal = ProgressionLogic.GetSlimeSellPrice(o1.CaughtInstance)
+				+ ProgressionLogic.GetSlimeSellPrice(o2.CaughtInstance)
+			local cashBefore = p.Cash
+
+			local okAll, _, paidTotal, soldCount = ProgressionLogic.SellAllUnplacedSlimes(p)
+			expect(okAll).toBe(true)
+			expect(soldCount).toBe(2)
+			expect(paidTotal).toBe(expectedTotal)
+			expect(p.Cash).toBe(cashBefore + expectedTotal)
+			expect(#p.UnplacedSlimes).toBe(0)
+			expect(p.PlacedSlimesBySlot[1] ~= nil).toBe(true)
 		end)
 	end)
 end

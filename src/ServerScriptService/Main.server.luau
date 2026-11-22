@@ -17,7 +17,7 @@ local ThrowService = require(script.Parent:WaitForChild("ThrowService"))
 
 MapOptimizer.Init()
 Remotes.Init()
-PlayerStateService.Init()
 MonetizationService.Init()
 PlotService.Init()
 ThrowService.Init()
+PlayerStateService.Init()

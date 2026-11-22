@@ -132,5 +132,28 @@ return function(t: any)
 				expect(slot.Claimed).toBe(false)
 			end
 		end)
+
+		it("scales Quest Line and Daily Quest Gem rewards by GetGemMultiplier", function()
+			local p = ProgressionLogic.CreateInitialProfile()
+			p.OwnedBoosts.gems_4x = true
+			local mult = ProgressionLogic.GetGemMultiplier(p)
+			expect(mult).toBe(4)
+
+			local step1 = GameConfig.Quests.Line[1]
+			p.QuestLineProgress = step1.Target
+			local gemsBefore = p.Gems
+			local ok, _, paid = QuestLogic.ClaimLineQuest(p, mult)
+			expect(ok).toBe(true)
+			expect(paid and paid.Gems).toBe((step1.Reward.Gems or 0) * 4)
+			expect(p.Gems).toBe(gemsBefore + (step1.Reward.Gems or 0) * 4)
+
+			p.DailyQuests = { { Id = "daily_throws_5", Progress = 5, Claimed = false } }
+			local dailyBase = GameConfig.QuestsById.daily_throws_5.Reward.Gems or 0
+			local beforeDaily = p.Gems
+			local okDaily, _, paidDaily = QuestLogic.ClaimDailyQuest(p, 1, mult)
+			expect(okDaily).toBe(true)
+			expect(paidDaily and paidDaily.Gems).toBe(dailyBase * 4)
+			expect(p.Gems).toBe(beforeDaily + dailyBase * 4)
+		end)
 	end)
 end

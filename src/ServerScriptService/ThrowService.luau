@@ -7,6 +7,7 @@
 	ThrowBroadcast for the flight camera & cinematic reveal cutscene.
 ]]
 
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -21,17 +22,40 @@ local PlayerStateService = require(script.Parent:WaitForChild("PlayerStateServic
 local ThrowService = {}
 
 local lastThrowTime: { [Player]: number } = {}
+local autoThrowBags: { [Player]: { number } } = {}
+
+local function isFiniteNumber(v: any): boolean
+	return type(v) == "number" and v == v and math.abs(v) < math.huge
+end
+
+-- Non-destructive peek at the player's next Auto-Throw meter target so the client's visible
+-- vertical meter can smoothly glide onto the exact Green / Light-Green band before firing.
+function ThrowService.PeekNextAutoMeterRatio(player: Player): number
+	local bag = autoThrowBags[player]
+	if not bag then
+		bag = {}
+		autoThrowBags[player] = bag
+	end
+	local ratio = ThrowPhysics.PeekAutoThrowRatio(bag)
+	return ratio
+end
 
 function ThrowService.Init()
 	local requestThrow = Remotes.GetEvent("RequestThrow")
 	local throwBroadcast = Remotes.GetEvent("ThrowBroadcast")
+
+	PlayerStateService.SetAutoMeterPeeker(ThrowService.PeekNextAutoMeterRatio)
+
+	Players.PlayerRemoving:Connect(function(player: Player)
+		lastThrowTime[player] = nil
+		autoThrowBags[player] = nil
+	end)
 
 	requestThrow.OnServerEvent:Connect(function(player: Player, payload: any)
 		local now = os.clock()
 		if lastThrowTime[player] and now - lastThrowTime[player] < 0.75 then
 			return
 		end
-		lastThrowTime[player] = now
 
 		local profile = PlayerStateService.GetProfile(player)
 		if not profile then
@@ -43,57 +67,65 @@ function ThrowService.Init()
 		local yawDeg = 0
 		local isAuto = type(payload) == "table" and payload.Auto == true
 
-		-- Auto-Throw is a Gem unlock; auto throws always use the fixed AutoThrow meter ratio
-		if isAuto and not profile.OwnedBoosts.auto_throw then
+		-- Auto-Throw is unlocked via Gems OR the Auto-Throw Robux Pass; draws from a shuffled 5-throw bag
+		if isAuto and not ProgressionLogic.OwnsAutoThrow(profile) then
 			return
 		end
 
 		if type(payload) == "table" then
-			if isAuto then
-				meterRatio = GameConfig.AutoThrow.MeterRatio
-			elseif type(payload.ChargeRatio) == "number" then
+			if not isAuto and isFiniteNumber(payload.ChargeRatio) then
 				meterRatio = math.clamp(payload.ChargeRatio, 0, 1)
 			end
-			if type(payload.PitchDeg) == "number" then
+			if isFiniteNumber(payload.PitchDeg) then
 				pitchDeg = math.clamp(payload.PitchDeg, GameConfig.Physics.MinPitchDeg, GameConfig.Physics.MaxPitchDeg)
 			end
-			if type(payload.YawDeg) == "number" then
+			if isFiniteNumber(payload.YawDeg) then
 				yawDeg = math.clamp(payload.YawDeg, -GameConfig.Physics.MaxYawDeg, GameConfig.Physics.MaxYawDeg)
 			end
 		end
 
-		local meterSeg = GameConfig.EvaluateMeterRatio(meterRatio)
-
-		local launchX = 0
 		local char = player.Character
 		local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
-		-- Only throws from the throw line count (same box as the client meter, with a little slack)
-		if root then
-			local pos = root.Position
-			local hub = GameConfig.Hub
-			local onLine = pos.X >= hub.ThrowLineMinX - 4
-				and pos.X <= hub.ThrowLineMaxX + 4
-				and pos.Z >= hub.ThrowLineZ - 13
-				and pos.Z <= hub.ThrowLineZ + 7
-			if not onLine then
-				return
-			end
+		if not root then
+			return
 		end
-		if root then
-			launchX = math.clamp(root.Position.X, -GameConfig.Hub.ClearHalfWidth + 2, GameConfig.Hub.ClearHalfWidth - 2)
+		-- Only throws from the throw line count (same box as the client meter, with a little slack)
+		local pos = root.Position
+		local hub = GameConfig.Hub
+		local onLine = pos.X >= hub.ThrowLineMinX - 4
+			and pos.X <= hub.ThrowLineMaxX + 4
+			and pos.Z >= hub.ThrowLineZ - 13
+			and pos.Z <= hub.ThrowLineZ + 7
+		if not onLine then
+			return
 		end
 
+		lastThrowTime[player] = now
+		if isAuto then
+			local bag = autoThrowBags[player]
+			if not bag then
+				bag = {}
+				autoThrowBags[player] = bag
+			end
+			meterRatio = ThrowPhysics.NextAutoThrowRatio(bag)
+		end
+
+		local meterSeg = GameConfig.EvaluateMeterRatio(meterRatio)
+		local launchX = math.clamp(pos.X, -GameConfig.Hub.ClearHalfWidth + 2, GameConfig.Hub.ClearHalfWidth - 2)
+
 		local origin = Vector3.new(launchX, GameConfig.Hub.FloorY + 1.8, GameConfig.Hub.ThrowLineZ)
-		local effectivePower = ProgressionLogic.GetEffectiveThrowPower(profile) + meterSeg.BonusPower
+		-- Use the player's true EffectiveThrowPower so terrain landing & gate unlock match the HUD 1:1
+		local effectivePower = ProgressionLogic.GetEffectiveThrowPower(profile)
 		local equippedDef = GameConfig.SlimesById[profile.EquippedSlimeId] or GameConfig.Slimes[1]
+		local chargeRatio = meterSeg.ChargeRatio
 
 		local simResult = ThrowPhysics.Simulate({
 			Origin = origin,
 			ThrowPower = effectivePower,
-			ChargeRatio = math.clamp(0.35 + 0.65 * meterRatio, 0.25, 1.0),
+			ChargeRatio = chargeRatio,
 			PitchDeg = pitchDeg,
 			YawDeg = yawDeg,
-			SlimeWeight = equippedDef.Weight,
+			SlimeWeight = 1.0,
 		})
 
 		-- Luck = distance down the lane x meter band x Jelly Bait quality (authoritative; the client ticker
@@ -129,7 +161,7 @@ function ThrowService.Init()
 			PlayerName = player.DisplayName,
 			Origin = origin,
 			ThrowPower = effectivePower,
-			ChargeRatio = math.clamp(0.35 + 0.65 * meterRatio, 0.25, 1.0),
+			ChargeRatio = chargeRatio,
 			MeterRatio = meterRatio,
 			BonusPower = meterSeg.BonusPower,
 			LuckMultiplier = totalLuck,
@@ -137,13 +169,18 @@ function ThrowService.Init()
 			BaitLuck = baitDef.LuckMultiplier,
 			BoostLuck = boostLuck,
 			IsAuto = isAuto,
+			NextAutoMeterRatio = if ProgressionLogic.OwnsAutoThrow(profile)
+				then ThrowService.PeekNextAutoMeterRatio(player)
+				else nil,
 			BaitTier = profile.BaitTier,
 			BaitName = baitDef.Name,
 			IsPerfect = meterSeg.IsPerfect == true,
+			QualityLabel = meterSeg.QualityLabel,
+			QualityColor = meterSeg.Color,
 			PitchDeg = pitchDeg,
 			YawDeg = yawDeg,
 			SlimeId = equippedDef.Id,
-			SlimeWeight = equippedDef.Weight,
+			SlimeWeight = 1.0,
 			Distance = simResult.Distance,
 			LandedZoneName = zoneDef.Name,
 			LandedZoneEmoji = zoneDef.Emoji,

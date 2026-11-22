@@ -71,8 +71,8 @@ Anything else is rejected without charging.
 
 | `PriceKind` | Paid from | Example items |
 | --- | --- | --- |
-| `Cash` | `profile.Cash` | power upgrade, bars, bait, x2 boosts, +4 slots ($5K) |
-| `Gems` | `profile.Gems` | Auto-Throw, Lucky Charm, +4 slots (60 Gems) |
-| `Robux` | Roblox Developer Products (`MonetizationService.ProcessReceipt`) | Featured Slime Eggs (`Enchanted Egg [New!]`, `Rainbow Egg [LIMITED]`) |
+| `Cash` | `profile.Cash` | Throw Power upgrades, Pull-Up Bar tiers (1–5), Jelly Bait tiers (1–5) |
+| `Gems` | `profile.Gems` | Locked Plot Slots #9–#12 (1-by-1), Auto-Throw, 2x Money, tiered 2x–10x Gems / Training Power / Luck (`Action = "MultiplierTier"`) |
+| `Robux` | Roblox Game Passes & Developer Products (`MonetizationService`) | Featured Slime Eggs, `+4 Plot Slots` Pass, `Auto-Throw` Pass, `2x Money` Pass, `VIP` Pass, `2x–10x` Gems / Power / Luck Passes, Gem Packs |
 
-The +4 slot unlock exists twice (`slot_expansion` for Cash, `gem_slot_expansion` for Gems); buying either one maxes both.
+Every premium Gem unlock is calibrated to an **8+ hour F2P grind floor** (see `docs/docs/ECONOMY-BASELINE.md`). Buying either the Gem tier or the equivalent Robux Game Pass unlocks the same tier (highest owned tier wins, up to `10x` max) so players never double-pay. Cash can never unlock Plot Slots 9–12.

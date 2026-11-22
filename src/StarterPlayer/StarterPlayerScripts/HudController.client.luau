@@ -46,7 +46,10 @@ local toastNotify = Remotes.GetEvent("ToastNotify")
 local requestPurchase = Remotes.GetEvent("RequestPurchase")
 local requestPlaceBest = Remotes.GetEvent("RequestPlaceBestSlimes")
 local requestPlaceOnSlot = Remotes.GetEvent("RequestPlaceOnSlot")
+local requestSellSlime = Remotes.GetEvent("RequestSellSlime")
+local openSellShop = Remotes.GetEvent("OpenSellShop")
 local requestEquipTrail = Remotes.GetEvent("RequestEquipTrail")
+local requestTeleport = Remotes.GetEvent("RequestTeleport")
 local requestClaimDaily = Remotes.GetEvent("RequestClaimDaily")
 local requestClaimQuest = Remotes.GetEvent("RequestClaimQuest")
 
@@ -111,9 +114,14 @@ modalScrim.Name = "ModalScrim"
 modalScrim.Size = UDim2.fromScale(1, 1)
 modalScrim.BackgroundColor3 = Color3.fromRGB(8, 10, 16)
 modalScrim.BackgroundTransparency = 1
+modalScrim.Active = true
 modalScrim.Visible = false
 modalScrim.ZIndex = 8
 modalScrim.Parent = screenGui
+
+modalScrim:GetPropertyChangedSignal("Visible"):Connect(function()
+	localPlayer:SetAttribute("ModalOpen", modalScrim.Visible)
+end)
 
 -- ============================================================================
 -- HUD FRAME (docs/docs/UI-MOCKUP-SPEC.md section 2, mockups 2a / 5a). Offsets are design pixels
@@ -145,6 +153,60 @@ local function setGradientTone(g: UIGradient, t: UiKit.Tri)
 		ColorSequenceKeypoint.new(1, t.Dark),
 	})
 end
+
+-- ----------------------------------------------------------------------------
+-- Top Teleport Bar (top centre, y 10): quick teleport to My Plot & Jelly Shop
+-- ----------------------------------------------------------------------------
+local topTeleportBar = Instance.new("Frame")
+topTeleportBar.Name = "TopTeleportBar"
+topTeleportBar.AnchorPoint = Vector2.new(0.5, 0)
+topTeleportBar.Position = UDim2.new(0.5, 0, 0, 10)
+topTeleportBar.Size = UDim2.fromOffset(0, 44)
+topTeleportBar.AutomaticSize = Enum.AutomaticSize.X
+topTeleportBar.BackgroundTransparency = 1
+topTeleportBar.Parent = screenGui
+makeList(topTeleportBar, Enum.FillDirection.Horizontal, 12, Enum.HorizontalAlignment.Center, Enum.VerticalAlignment.Center)
+
+local closeAllModals: () -> () = function() end
+
+local function makeTeleportButton(name: string, iconKey: string, text: string, kind: UiKit.ButtonKind, width: number, order: number, target: string)
+	local _, face = UiKit.CreateGradientButton({
+		Name = name,
+		Parent = topTeleportBar,
+		Size = UDim2.fromOffset(width, 44),
+		Kind = kind,
+		CornerRadius = 14,
+		LayoutOrder = order,
+		OnClick = function()
+			if (localPlayer:GetAttribute("InThrow") :: boolean?) == true
+				or (localPlayer:GetAttribute("InRevealCutscene") :: boolean?) == true
+			then
+				return
+			end
+			closeAllModals()
+			requestTeleport:FireServer({ Target = target })
+		end,
+	})
+	local icon = UiKit.CreateIcon(face, iconKey, 26)
+	icon.AnchorPoint = Vector2.new(0, 0.5)
+	icon.Position = UDim2.new(0, 12, 0.5, 0)
+	icon.ZIndex = 3
+	local lbl = Instance.new("TextLabel")
+	lbl.Position = UDim2.fromOffset(42, 0)
+	lbl.Size = UDim2.new(1, -48, 1, 0)
+	lbl.BackgroundTransparency = 1
+	lbl.Font = Enum.Font.FredokaOne
+	lbl.TextSize = 20
+	lbl.TextXAlignment = Enum.TextXAlignment.Left
+	lbl.TextColor3 = Colors.White
+	lbl.Text = text
+	lbl.ZIndex = 3
+	lbl.Parent = face
+	UiKit.AddTextStroke(lbl)
+end
+
+makeTeleportButton("TpPlotBtn", "basket", "My Plot", "blue", 142, 1, "Plot")
+makeTeleportButton("TpShopBtn", "shop", "Jelly Shop", "orange", 164, 2, "JellyShop")
 
 -- ----------------------------------------------------------------------------
 -- Objective + Toast (top centre, y 64 / phone 74)
@@ -210,7 +272,7 @@ local function showToast(msg: string, tone: (UiLayout.ToastKey | Color3)?)
 	local myToken = toastToken
 	local t: UiKit.Tri = if typeof(tone) == "Color3"
 		then UiKit.TriFromColor(tone, 0.5, 0.25)
-		elseif tone then TOAST_TONES[tone]
+		elseif tone then (TOAST_TONES[tone] or TOAST_TONES.gold)
 		else TOAST_TONES.gold
 	setGradientTone(toastGradient, t)
 	toastLabel.Text = msg
@@ -485,6 +547,8 @@ local function findFirstFreePlotSlot(): number?
 	return nil
 end
 
+local rebuildHotbar: () -> ()
+
 local quickPlaceBtn = UiKit.CreateGradientButton({
 	Name = "QuickPlaceBtn",
 	Parent = hotbarGroup,
@@ -500,13 +564,21 @@ local quickPlaceBtn = UiKit.CreateGradientButton({
 		if not selectedHotbarUid then
 			return
 		end
-		local freeSlot = findFirstFreePlotSlot() or 1
+		local freeSlot = findFirstFreePlotSlot()
+		if not freeSlot then
+			showToast("All plot slots are full!", "red")
+			return
+		end
 		requestPlaceOnSlot:FireServer({
 			SlimeUid = selectedHotbarUid,
 			SlotIndex = freeSlot,
 		})
 		selectedHotbarUid = nil
 		CharacterAnimator.StopCarrySlime()
+		quickPlaceBtn.Visible = false
+		if rebuildHotbar then
+			rebuildHotbar()
+		end
 	end,
 })
 quickPlaceBtn.Visible = false
@@ -701,6 +773,20 @@ local slimesWin = SlimesWindow.Build(screenGui, {
 		CharacterAnimator.StopCarrySlime()
 		quickPlaceBtn.Visible = false
 	end,
+	OnSell = function(uid: string)
+		if selectedHotbarUid == uid then
+			selectedHotbarUid = nil
+			CharacterAnimator.StopCarrySlime()
+			quickPlaceBtn.Visible = false
+		end
+		requestSellSlime:FireServer({ SlimeUid = uid })
+	end,
+	OnSellAll = function()
+		selectedHotbarUid = nil
+		CharacterAnimator.StopCarrySlime()
+		quickPlaceBtn.Visible = false
+		requestSellSlime:FireServer({ Mode = "All" })
+	end,
 })
 
 -- Gift picker: only items whose developer product exists can be gifted (all 0 = GIFT! stays hidden)
@@ -752,6 +838,20 @@ local allModals: { Frame } = {
 	slimesWin.Frame,
 }
 
+local welcomeBack: WelcomeBackWindow.WelcomeBackHandle
+
+closeAllModals = function()
+	for _, m in allModals do
+		m.Visible = false
+	end
+	giftPicker.Frame.Visible = false
+	if welcomeBack then
+		welcomeBack.Frame.Visible = false
+	end
+	modalScrim.BackgroundTransparency = 1
+	modalScrim.Visible = false
+end
+
 local function toggleExclusiveModal(target: Frame)
 	local willOpen = not target.Visible
 	for _, m in allModals do
@@ -759,11 +859,14 @@ local function toggleExclusiveModal(target: Frame)
 			m.Visible = false
 		end
 	end
+	giftPicker.Frame.Visible = false
+	if welcomeBack then
+		welcomeBack.Frame.Visible = false
+	end
 	UiKit.ToggleModalAnimated(target, modalScrim, willOpen)
 end
 
 -- Welcome Back (offline income) and unlock pop-ups (server-driven)
-local welcomeBack: WelcomeBackWindow.WelcomeBackHandle
 welcomeBack = WelcomeBackWindow.Build(screenGui, {
 	ModalScrim = modalScrim,
 	OnClaim = function()
@@ -791,6 +894,12 @@ local unlockPopups = UnlockPopups.Build(screenGui, {
 Remotes.GetEvent("UnlockPopup").OnClientEvent:Connect(function(payload: any)
 	if type(payload) == "table" and type(payload.Name) == "string" then
 		unlockPopups.Push(payload)
+	end
+end)
+
+openSellShop.OnClientEvent:Connect(function()
+	if not slimesWin.Frame.Visible then
+		toggleExclusiveModal(slimesWin.Frame)
 	end
 end)
 
@@ -844,6 +953,12 @@ end, true)
 -- 8. REFRESH UI FUNCTIONS (HOTBAR WITH 3D VIEWPORTS, INDEX, SHOP, BACKPACK)
 -- ============================================================================
 local function selectHotbarSlime(inst: any)
+	if (localPlayer:GetAttribute("NearThrowLine") :: boolean?) == true then
+		selectedHotbarUid = nil
+		CharacterAnimator.StopCarrySlime()
+		quickPlaceBtn.Visible = false
+		return
+	end
 	if selectedHotbarUid == inst.Uid then
 		selectedHotbarUid = nil
 		CharacterAnimator.StopCarrySlime()
@@ -854,6 +969,17 @@ local function selectHotbarSlime(inst: any)
 		quickPlaceBtn.Visible = true
 	end
 end
+
+localPlayer:GetAttributeChangedSignal("NearThrowLine"):Connect(function()
+	if (localPlayer:GetAttribute("NearThrowLine") :: boolean?) == true and selectedHotbarUid ~= nil then
+		selectedHotbarUid = nil
+		CharacterAnimator.StopCarrySlime()
+		quickPlaceBtn.Visible = false
+		if rebuildHotbar then
+			rebuildHotbar()
+		end
+	end
+end)
 
 -- Fill one of the 5 persistent slots. The 3D viewport is only rebuilt when the slime in the slot changes.
 local function renderHotbarSlot(slot: HotbarSlot, inst: any, isSelected: boolean)
@@ -896,7 +1022,7 @@ local function renderHotbarSlot(slot: HotbarSlot, inst: any, isSelected: boolean
 	end
 end
 
-local function rebuildHotbar()
+rebuildHotbar = function()
 	local unplaced = currentState.UnplacedSlimes or {}
 	for i, slot in hotbarSlots do
 		local inst = unplaced[i]
@@ -917,6 +1043,14 @@ end
 
 UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
 	if gameProcessed then
+		return
+	end
+	if
+		(localPlayer:GetAttribute("InRevealCutscene") :: boolean?) == true
+		or (localPlayer:GetAttribute("InTraining") :: boolean?) == true
+		or (localPlayer:GetAttribute("InThrow") :: boolean?) == true
+		or (localPlayer:GetAttribute("ModalOpen") :: boolean?) == true
+	then
 		return
 	end
 	local keyMap: { [Enum.KeyCode]: number } = {
@@ -1057,11 +1191,16 @@ RunService.RenderStepped:Connect(function()
 	local inTraining = (localPlayer:GetAttribute("InTraining") :: boolean?) == true
 	screenGui.Enabled = not inCutscene and not inTraining
 	if inCutscene or inTraining then
+		arrowPart.Transparency = 1
+		for _, chev in chevrons do
+			chev.Transparency = 1
+		end
 		return
 	end
 
-	-- Spec 4: Objective and Hotbar hide while the bait is in flight (ThrowController sets the attribute)
+	-- Spec 4: Objective, Top Teleport Bar, and Hotbar hide while the bait is in flight (ThrowController sets the attribute)
 	local inThrow = (localPlayer:GetAttribute("InThrow") :: boolean?) == true
+	topTeleportBar.Visible = not inThrow
 	objectiveGroup.Visible = not inThrow
 	hotbarGroup.Visible = not inThrow
 

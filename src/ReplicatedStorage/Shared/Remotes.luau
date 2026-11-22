@@ -23,6 +23,8 @@ local EVENT_NAMES = {
 	"RequestPlaceBestSlimes",
 	"RequestPlaceOnSlot",
 	"RequestPickupFromSlot",
+	"RequestSellSlime", -- C->S { SlimeUid: string } | { Mode = "All" }: sell unwanted backpack slimes for Cash
+	"OpenSellShop", -- S->C: opened by Hub.SellShop prompt to show the My Slimes / Sell window
 	"RequestEquipTrail",
 	"RequestClaimDaily", -- C->S: manual daily reward claim on the 7-day calendar
 	"RequestClaimQuest", -- C->S { Kind = "Line" | "Daily", Index: number? }: claim completed quest

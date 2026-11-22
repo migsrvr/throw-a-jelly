@@ -216,11 +216,19 @@ function ProfileSerializer.Deserialize(data: any): ProgressionLogic.PlayerProfil
 		end
 	end
 
-	-- Boosts (known ids only)
+	-- Boosts (known ids only; migrate legacy Cash boost IDs cleanly to the new Gem/Robux multiplier IDs)
+	local legacyBoostMap: { [string]: string } = {
+		double_cash = "money_2x",
+		double_power = "power_2x",
+		lucky_charm = "luck_2x",
+	}
 	if type(data.OwnedBoosts) == "table" then
 		for id, owned in data.OwnedBoosts do
-			if owned == true and type(id) == "string" and GameConfig.ShopBoosts[id] then
-				p.OwnedBoosts[id] = true
+			if owned == true and type(id) == "string" then
+				local targetId = legacyBoostMap[id] or id
+				if GameConfig.ShopBoosts[targetId] then
+					p.OwnedBoosts[targetId] = true
+				end
 			end
 		end
 	end

@@ -44,9 +44,25 @@ local CARD_TONE: UiKit.Tri = {
 }
 
 local PASS_ICONS: { [string]: string } = {
-	pass_x2_luck = "clover",
+	pass_extra_slots = "basket",
+	pass_auto_throw = "robot",
 	pass_x2_cash = "cash",
 	pass_vip = "crown",
+	pass_x2_luck = "clover",
+	pass_luck_4x = "clover",
+	pass_luck_6x = "clover",
+	pass_luck_8x = "clover",
+	pass_luck_10x = "clover",
+	pass_gems_2x = "gem",
+	pass_gems_4x = "gem",
+	pass_gems_6x = "gem",
+	pass_gems_8x = "gem",
+	pass_gems_10x = "gem",
+	pass_power_2x = "power",
+	pass_power_4x = "power",
+	pass_power_6x = "power",
+	pass_power_8x = "power",
+	pass_power_10x = "power",
 }
 
 local RAINBOW = ColorSequence.new({
@@ -94,12 +110,17 @@ local function makeBuyButton(
 	available: boolean,
 	onClick: () -> ()
 ): (TextButton, (owned: boolean) -> ())
+	local isOwned = false
 	local btn, face = UiKit.CreateGradientButton({
 		Parent = parent,
 		Size = size,
 		Kind = if available then "green" else "grey",
 		CornerRadius = 16,
-		OnClick = onClick,
+		OnClick = function()
+			if not isOwned then
+				onClick()
+			end
+		end,
 	})
 	local top = makeLabel(face, 14, if available then topText else "Coming soon")
 	top.Position = UDim2.fromOffset(0, 5)
@@ -138,6 +159,7 @@ local function makeBuyButton(
 		price.TextTransparency = 0.25
 	end
 	local function setOwned(owned: boolean)
+		isOwned = owned
 		if owned then
 			top.Text = "Permanent"
 			glyph.Visible = false
@@ -160,7 +182,7 @@ local function divider(parent: Instance, text: string, order: number)
 		local line = Instance.new("Frame")
 		line.AnchorPoint = Vector2.new(if side < 0 then 0 else 1, 0.5)
 		line.Position = UDim2.new(if side < 0 then 0 else 1, 0, 0.5, 0)
-		line.Size = UDim2.new(0.5, -130, 0, 4)
+		line.Size = UDim2.new(0.5, -162, 0, 4)
 		line.BackgroundColor3 = Color3.fromRGB(70, 72, 84)
 		line.BorderSizePixel = 0
 		line.Parent = row
@@ -169,7 +191,7 @@ local function divider(parent: Instance, text: string, order: number)
 	local pill = Instance.new("Frame")
 	pill.AnchorPoint = Vector2.new(0.5, 0.5)
 	pill.Position = UDim2.fromScale(0.5, 0.5)
-	pill.Size = UDim2.fromOffset(230, 38)
+	pill.Size = UDim2.fromOffset(296, 38)
 	pill.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 	pill.Parent = row
 	UiKit.AddCorner(pill, 19)
@@ -313,6 +335,11 @@ function RobuxStoreWindow.Build(parent: Instance, ctx: RobuxStoreContext): Robux
 	odds.Frame.ZIndex = 30
 	odds.Close.Activated:Connect(function()
 		UiKit.ToggleModalAnimated(odds.Frame, nil, false)
+	end)
+	modal:GetPropertyChangedSignal("Visible"):Connect(function()
+		if not modal.Visible and odds.Frame.Visible then
+			UiKit.ToggleModalAnimated(odds.Frame, nil, false)
+		end
 	end)
 	local oddsIcon = UiKit.CreateIconPlate(odds.Header, "egg", 48)
 	oddsIcon.AnchorPoint = Vector2.new(1, 0.5)
@@ -547,43 +574,117 @@ function RobuxStoreWindow.Build(parent: Instance, ctx: RobuxStoreContext): Robux
 	end
 
 	-- ============================================================================
-	-- GAME PASSES (130 high, pass colour gradient, icon 60)
+	-- GAME PASSES: Core wide cards + compact 2-column grids for Luck / Gems / Power (2x-10x)
 	-- ============================================================================
-	divider(scroll, "Game Passes", nextOrder())
 	type PassUi = { Pass: GameConfig.RobuxPassDef, SetOwned: (boolean) -> () }
 	local passUis: { PassUi } = {}
-	for _, pass in GameConfig.Robux.Passes do
-		local card = Instance.new("Frame")
-		card.Name = "Pass_" .. pass.Id
-		card.LayoutOrder = nextOrder()
-		card.Size = UDim2.new(1, 0, 0, 130)
-		card.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-		card.Parent = scroll
-		UiKit.AddCorner(card, 20)
-		UiKit.ApplyTri(card, UiKit.TriFromColor(rgb(pass.Color), 0.3, 0.45))
-		UiKit.AddFrameOutline(card, 4)
-		UiKit.AddStripes(card, 20)
-		local plate = UiKit.CreateIconPlate(card, PASS_ICONS[pass.Id] or "star", 90)
-		plate.Position = UDim2.fromOffset(20, 20)
-		local name = makeLabel(card, 34, pass.Name, Enum.TextXAlignment.Left)
-		name.Position = UDim2.fromOffset(128, 22)
-		name.Size = UDim2.fromOffset(420, 42)
-		local desc = makeLabel(card, 19, pass.Description, Enum.TextXAlignment.Left)
-		desc.Position = UDim2.fromOffset(128, 68)
-		desc.Size = UDim2.new(1, -420, 0, 40)
-		desc.TextWrapped = true
-		desc.TextYAlignment = Enum.TextYAlignment.Top
-		local passCopy = pass
-		local btn, setOwned = makeBuyButton(card, UDim2.fromOffset(190, 74), "Buy", pass.RobuxPrice, pass.PassId > 0, function()
-			if passCopy.PassId <= 0 then
-				ctx.OnToast(`{passCopy.Name} is coming soon!`, Color3.fromRGB(255, 215, 85))
-				return
+
+	local passGroups: { { Category: string, Title: string, Wide: boolean } } = {
+		{ Category = "Core", Title = "Core Passes", Wide = true },
+		{ Category = "Luck", Title = "Luck Passes (2x–10x)", Wide = false },
+		{ Category = "Gems", Title = "Gems Passes (2x–10x)", Wide = false },
+		{ Category = "Power", Title = "Power Passes (2x–10x)", Wide = false },
+	}
+
+	for _, group in passGroups do
+		local passesInGroup: { GameConfig.RobuxPassDef } = {}
+		for _, pass in GameConfig.Robux.Passes do
+			if (pass.Category or "Core") == group.Category then
+				table.insert(passesInGroup, pass)
 			end
-			MarketplaceService:PromptGamePassPurchase(localPlayer, passCopy.PassId)
-		end)
-		btn.AnchorPoint = Vector2.new(1, 0.5)
-		btn.Position = UDim2.new(1, -22, 0.5, 0)
-		table.insert(passUis, { Pass = pass, SetOwned = setOwned })
+		end
+		if #passesInGroup == 0 then
+			continue
+		end
+
+		divider(scroll, group.Title, nextOrder())
+
+		if group.Wide then
+			for _, pass in passesInGroup do
+				local card = Instance.new("Frame")
+				card.Name = "Pass_" .. pass.Id
+				card.LayoutOrder = nextOrder()
+				card.Size = UDim2.new(1, 0, 0, 124)
+				card.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+				card.Parent = scroll
+				UiKit.AddCorner(card, 20)
+				UiKit.ApplyTri(card, UiKit.TriFromColor(rgb(pass.Color), 0.3, 0.45))
+				UiKit.AddFrameOutline(card, 4)
+				UiKit.AddStripes(card, 20)
+				local plate = UiKit.CreateIconPlate(card, PASS_ICONS[pass.Id] or "star", 86)
+				plate.Position = UDim2.fromOffset(20, 19)
+				local name = makeLabel(card, 32, pass.Name, Enum.TextXAlignment.Left)
+				name.Position = UDim2.fromOffset(124, 20)
+				name.Size = UDim2.fromOffset(420, 40)
+				local desc = makeLabel(card, 18, pass.Description, Enum.TextXAlignment.Left)
+				desc.Position = UDim2.fromOffset(124, 64)
+				desc.Size = UDim2.new(1, -360, 0, 42)
+				desc.TextWrapped = true
+				desc.TextYAlignment = Enum.TextYAlignment.Top
+				local passCopy = pass
+				local btn, setOwned = makeBuyButton(card, UDim2.fromOffset(190, 72), "Buy", pass.RobuxPrice, pass.PassId > 0, function()
+					if passCopy.PassId <= 0 then
+						ctx.OnToast(`{passCopy.Name} is coming soon!`, Color3.fromRGB(255, 215, 85))
+						return
+					end
+					MarketplaceService:PromptGamePassPurchase(localPlayer, passCopy.PassId)
+				end)
+				btn.AnchorPoint = Vector2.new(1, 0.5)
+				btn.Position = UDim2.new(1, -22, 0.5, 0)
+				table.insert(passUis, { Pass = pass, SetOwned = setOwned })
+			end
+		else
+			local rows = math.ceil(#passesInGroup / 2)
+			local cellH = 104
+			local padY = 10
+			local gridHolder = Instance.new("Frame")
+			gridHolder.Name = "PassGrid_" .. group.Category
+			gridHolder.LayoutOrder = nextOrder()
+			gridHolder.Size = UDim2.new(1, 0, 0, rows * cellH + math.max(0, rows - 1) * padY)
+			gridHolder.BackgroundTransparency = 1
+			gridHolder.Parent = scroll
+			local grid = Instance.new("UIGridLayout")
+			grid.CellSize = UDim2.new(0.5, -6, 0, cellH)
+			grid.CellPadding = UDim2.fromOffset(12, padY)
+			grid.SortOrder = Enum.SortOrder.LayoutOrder
+			grid.Parent = gridHolder
+
+			for i, pass in passesInGroup do
+				local card = Instance.new("Frame")
+				card.Name = "Pass_" .. pass.Id
+				card.LayoutOrder = i
+				card.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+				card.Parent = gridHolder
+				UiKit.AddCorner(card, 18)
+				UiKit.ApplyTri(card, UiKit.TriFromColor(rgb(pass.Color), 0.3, 0.45))
+				UiKit.AddFrameOutline(card, 3.5)
+				UiKit.AddStripes(card, 18)
+
+				local plate = UiKit.CreateIconPlate(card, PASS_ICONS[pass.Id] or "star", 68)
+				plate.Position = UDim2.fromOffset(14, 18)
+				local name = makeLabel(card, 24, pass.Name, Enum.TextXAlignment.Left)
+				name.Position = UDim2.fromOffset(94, 14)
+				name.Size = UDim2.new(1, -248, 0, 32)
+				name.TextTruncate = Enum.TextTruncate.AtEnd
+				local desc = makeLabel(card, 14, pass.Description, Enum.TextXAlignment.Left)
+				desc.Position = UDim2.fromOffset(94, 48)
+				desc.Size = UDim2.new(1, -248, 0, 42)
+				desc.TextWrapped = true
+				desc.TextYAlignment = Enum.TextYAlignment.Top
+
+				local passCopy = pass
+				local btn, setOwned = makeBuyButton(card, UDim2.fromOffset(136, 66), "Buy", pass.RobuxPrice, pass.PassId > 0, function()
+					if passCopy.PassId <= 0 then
+						ctx.OnToast(`{passCopy.Name} is coming soon!`, Color3.fromRGB(255, 215, 85))
+						return
+					end
+					MarketplaceService:PromptGamePassPurchase(localPlayer, passCopy.PassId)
+				end)
+				btn.AnchorPoint = Vector2.new(1, 0.5)
+				btn.Position = UDim2.new(1, -14, 0.5, 0)
+				table.insert(passUis, { Pass = pass, SetOwned = setOwned })
+			end
+		end
 	end
 
 	-- ============================================================================
@@ -702,7 +803,23 @@ function RobuxStoreWindow.Build(parent: Instance, ctx: RobuxStoreContext): Robux
 	local function refresh(state: any)
 		local ownedPasses = if type(state.OwnedPasses) == "table" then state.OwnedPasses else {}
 		for _, p in passUis do
-			p.SetOwned(ownedPasses[p.Pass.Id] == true)
+			local pass = p.Pass
+			local owned = ownedPasses[pass.Id] == true
+			if not owned then
+				if pass.UnlocksExtraSlots then
+					owned = ProgressionLogic.GetEffectiveMaxSlimes(state) >= GameConfig.Slots.ExpandedMaxSlimes
+				elseif pass.UnlocksAutoThrow then
+					owned = ProgressionLogic.OwnsAutoThrow(state)
+				elseif pass.TrackId then
+					local needed = pass.LuckMultiplier
+						or pass.GemMultiplier
+						or pass.PowerMultiplier
+						or pass.CashMultiplier
+						or 2
+					owned = ProgressionLogic.GetTrackMultiplier(state, pass.TrackId) >= needed
+				end
+			end
+			p.SetOwned(owned)
 		end
 	end
 

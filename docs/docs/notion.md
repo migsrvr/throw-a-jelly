@@ -89,80 +89,78 @@ Zones are drawn as a tiered "staircase" of terrain in the thumbnail style.
   - **Auto-Throw** always stops the meter in band 5 (+9 power, 1.15x luck), so a hand-timed PERFECT is still better. Throws start after 0.8 s idle at the throw line while the AUTO toggle is on.
   - **Robux gem packs** are not built yet; they need real developer product ids.
 
-- 2026-11-22: Implemented `UI-PLAN.md` (all 3 phases):
-  - **6-button HUD & modular windows (`HudWindows/`)**: Left column = Index, Shop (Cash: Eggs, Throw Power Buy + Buy Max, x2 Cash/Power, Free Gift), Upgrades (`bait_tier`, `slot_expansion`, and the 💎 Gem Shop). Right column = Rewards (with red `"!"` badge), Robux Store (`R$`), and Slimes.
+- 2026-11-22: Implemented `UI-PLAN.md` (all 3 phases) + HUD/Shop/Upgrades reorganization (confirmed working in Studio):
+  - **5-button HUD & modular windows (`HudWindows/`)**:
+    - Left column (3 buttons): **Index** (`📘`), **Shop** (`R$`, unified Robux Shop), and **Upgrades** (`⬆️`).
+    - Right column (2 buttons): **Rewards** (`🎁`, with red `"!"` claim badge) and **Slimes** (3D Slime icon).
+  - **3-Tab Upgrades Window (`UpgradesWindow.luau`)**: Replaced stacked sections with 3 switchable tabs, each with its own glossy Tab Header Banner plus live Cash/Gems balance pills:
+    - **`⚡ Power & Training`**: Throw Power (`power_upgrade`: Buy + Buy Max), Pull-Up Bar Tier (`pullup_tier`), and `x2 Training Power` (`boost_double_power`).
+    - **`🥕 Bait & Plot`**: Jelly Bait Quality Tier (`bait_tier`), `+4 Slime Slots` (`slot_expansion`, `$5K`), and `x2 Cash` (`boost_double_cash`).
+    - **`💎 Gem Upgrades`**: `Auto-Throw`, `Lucky Charm`, and `+4 Slime Slots` (Gems).
+  - **Unified Left-Side Robux Shop (`RobuxStoreWindow.luau` + `MonetizationService.luau`)**:
+    - Featured Slime Eggs (**Enchanted Egg `[New!]`** & **Rainbow Egg `[LIMITED]`**) are now **Robux-only (`R$`)** (`PriceKind = "Robux"`), rejecting Cash purchases and granting via `MonetizationService.ProcessReceipt` (`ProgressionLogic.GrantRobuxEgg`).
+    - Includes 3 permanent Game Passes (`x2 Luck`, `x2 Cash`, `VIP`), 4 Robux Gem Packs (`100 / 550 / 1,200 / 2,600 Gems`), and the one-time Free Bonus Slime Gift card. All Robux IDs default to `0` (`"Coming soon"`) until pasted into `GameConfig.Robux`.
   - **Step-on Pull-Up Bar**: Walking within 6 studs of your bar's `TrainSpot` auto-starts training; jumping or walking away disarms it until you step out past 9 studs. The bar's E prompt now upgrades the bar tier (`Upgrade Bar`) and is hidden on other players' bars.
   - **Rewards & Quests (`QuestLogic.luau` + `RewardsWindow.luau`)**: Manual 7-day daily login calendar (`RequestClaimDaily`), a 12-step linear Quest Line, and 3 deterministic Daily Quests per UTC day (`RequestClaimQuest`).
-  - **Robux Store (`MonetizationService.luau` + `RobuxStoreWindow.luau`)**: 3 Game Passes (`x2 Luck`, `x2 Cash`, `VIP`) and 4 Gem Packs (`100 / 550 / 1,200 / 2,600 Gems`) with `ProcessReceipt` deduplication (`ProcessedReceipts`) and immediate save before `PurchaseGranted`. IDs default to `0` (`"Coming soon"` in UI) until pasted into `GameConfig.Robux`.
   - Fixed all `$$` double-dollar string formatting bugs across the codebase.
 
 ## Update
 
-**2026-11-21: game logic, animations, the power system, saving and Gems are built; the screens are still placeholders.** Everything below is written from the code and the automated tests (69 passing, 0 failing). Nothing here has been confirmed by playing in Studio except where it says so.
+**2026-11-22: game logic, animations, power system, saving, Gems, tabbed Upgrades (`⬆️`), left-side Robux Shop (with Robux-only Eggs), Rewards/Quests, and step-on Pull-Up Bar are all built and confirmed working in Studio** (77 automated Lune tests passing, 0 failing).
 
 ### Progress tracker
 
-**Done (in code, covered by tests where the logic is pure)**
+**Done & confirmed working in Studio (covered by 77 automated Lune tests)**
 - [x] Map v2: canyon lane, 5 zones, 5 player plots, per-plot spawn
-- [x] Throw flow: meter, pitch animation, bait flight, reveal cutscene
+- [x] Throw flow: 0-20 meter with PERFECT, pitch animation, live distance luck, bait flight, reveal cutscene
 - [x] Slimes, 5 mutations, hotbar, plot slots, passive income, Slime Index
-- [x] Pull-up training: looping animation, server-timed reps, rep camera and effects
-- [x] Shop: one catalog and one purchase path
-- [x] Power System: Training XP and Strength Levels, Bonus Rep pop-ups, 0-20 meter with PERFECT, live distance luck, 5 bait tiers
-- [x] Docs data generator (`DATA-REFERENCE.md`) updated for the power system, Gems and saving
-- [x] Saving: save format and DataStore service (autosave, save on leave and shutdown)
-- [x] Gems: earning (Index milestones, first zone reach, daily streak, rare catches) and spending (Auto-Throw, Lucky Charm, +4 slots), 💎 HUD counter, Gem Shop card
+- [x] Step-on Pull-up training: walk under bar to auto-start, jump/walk to stop, E prompt to upgrade bar tier, XP bar, Strength Levels, Bonus Rep pop-ups, front camera & rep FX
+- [x] Tabbed Upgrades window (`⬆️`): 3 tabs (`⚡ Power & Training`, `🥕 Bait & Plot`, `💎 Gem Upgrades`) each with its own header banner, Throw Power Buy + Buy Max, Bar Tier, Bait Tiers, +4 Slots, x2 Boosts, and Gem Shop
+- [x] Unified left-side Robux Shop (`R$`): Robux-only Featured Eggs (`Enchanted Egg [New!]`, `Rainbow Egg [LIMITED]`), Game Passes (`x2 Luck`, `x2 Cash`, `VIP`), Gem Packs (`100 / 550 / 1,200 / 2,600 Gems`), Free Gift card, and `MonetizationService` (`ProcessReceipt` dedupe + save-before-grant)
+- [x] Rewards window (`🎁`, red `"!"` badge): manual 7-day daily login calendar, 12-step linear Quest Line, and 3 deterministic Daily Quests per UTC day
+- [x] Saving: save format (`ProfileSerializer.luau`) and DataStore service (`DataService.luau`: autosave, save on leave and shutdown)
+- [x] Gems: earning (Index milestones, first zone reach, daily calendar, quests, rare catches) and spending (Auto-Throw, Lucky Charm, +4 slots)
 - [x] Auto-Throw toggle at the throw line
-
-**Built, not yet confirmed in Studio**
-- [ ] XP bar fills and the "LEVEL UP! +5 POWER" popup appears
-- [ ] Bonus Rep button appears every 4-6 s and gives 3x XP
-- [ ] "PERFECT!" callout on the top band, and the luck number climbing during flight
-- [ ] Buying Berry Jelly raises luck on the next throw (about 1.35x)
-- [ ] Progress survives leaving and rejoining (needs a published place and Studio API access turned on)
-- [ ] Daily reward toast on join; first throw shows "+5 💎" in the reveal; the 💎 counter updates
-- [ ] Gem Shop buys work, and the AUTO toggle appears after buying Auto-Throw and throws by itself
+- [x] Fixed all `$$` double-dollar string bugs and regenerated `DATA-REFERENCE.md`
 
 **To do**
+- [ ] Paste real Roblox Developer Product IDs & Game Pass IDs into `GameConfig.Robux` and `GameConfig.ShopEggs`
 - [ ] Slime evolve/absorb (design only so far)
-- [ ] Robux: gem packs and passes (need product ids)
 - [ ] Session locking for saves (before launch)
-- [ ] Sound, phone layout, settings (including a camera shake toggle), tutorial, daily reward calendar screen
-- [ ] Economy tuning (including Gem amounts)
-- [ ] UI redesign (Shop first, then training screen, Index, HUD)
-- [ ] Update `GAME-OVERVIEW.md` for the power system and Gems
+- [ ] Sound, phone layout, settings (including a camera shake toggle)
+- [ ] Economy tuning (including Gem amounts and Robux prices)
+- [ ] Visual polish / final art pass for the HUD and windows
+- [ ] Update `GAME-OVERVIEW.md` for the power system, Gems, and quests
 
 ### What is built
 
-- **Throw flow:** a 9-band meter (0-20 bonus power, luck 1.00x to 1.75x) where the top band shows "PERFECT!" for +20 power, a full baseball-pitch avatar animation (works in Studio on the R6 avatar), bait flight where the luck number climbs live with distance (`(1 + distance / 350) x meter luck x bait luck`) next to the zone banner, then the reveal cutscene: silhouette slime pops up and hops to the bait while a "1 in X" counter climbs, then the reveal with NEW! and SUPER LUCKY! badges.
+- **Throw flow:** a 9-band meter (0-20 bonus power, luck 1.00x to 1.75x) where the top band shows "PERFECT!" for +20 power, a full baseball-pitch avatar animation, bait flight where the luck number climbs live with distance (`(1 + distance / 350) x meter luck x bait luck`) next to the zone banner, then the reveal cutscene: silhouette slime pops up and hops to the bait while a "1 in X" counter climbs, then the reveal with NEW! and SUPER LUCKY! badges.
 - **Slimes:** 15 slimes (3 per zone), 5 mutations (Emerald x1.5, Golden x2.5, Crystal x4, Rainbow x7.5 income), hotbar of up to 5 uncaught slimes, placing onto plot slots (8, with a one-time +4 unlock to 12), passive income every second, Slime Index with silhouettes and per-zone trail bonuses.
-- **Pull-up training:** press E at your own bar to start a looping pull-up (E again, jump or walk to stop). Rep speed depends on strength and bar tier, from about 1.3 s per rep down to 0.35 s. Each rep adds Training XP (levels need `floor(10 * level^1.35)` XP) and every Strength Level gives +5 Throw Power. While training, an XP bar shows the level and progress, a "LEVEL UP! +5 POWER" popup fires on each level, and a "BONUS REP" button appears every 4-6 s for 2.5 s: tapping it gives 3x XP. There are 5 bars (Pull-Up, Iron, Crystal, Magma, Starlight) with more XP per rep (2, 8, 32, 140, 600) and faster reps. The server controls the timing and the bonus offers, so neither can be sped up or spammed. The animation is exaggerated, the server pays each rep at the top of the pull, and while training the camera takes a low front view with a small shake on every rep, plus dust, ring, sweat and "+X" effects. (Not yet confirmed in Studio.)
-- **Shop:** one catalog and one purchase path. A UI button only says "buy item X". Prices and rules live in one config, and the shop reads them. Items: 2 eggs (buy 1 or 3), Throw Power upgrade (buy 1 or buy max), bar upgrade, Jelly Bait upgrade (5 tiers, Carrot Jelly to Starlight Cake, up to 4.00x luck), +4 slots, x2 Cash, x2 Training Power, and a one-time free gift. A Gem Shop card sells Auto-Throw, Lucky Charm and the +4 slots for Gems.
-- **Saving:** progress autosaves every 60 s, when you leave and when the server shuts down (`DataService.luau`, format in `ProfileSerializer.luau`). (Not yet confirmed in Studio.)
-- **Gems:** 💎 counter in the HUD under Cash. Earned from Index milestones, first time reaching each zone, a daily login streak (toast on join) and rare throw catches (shown as "+N 💎" in the reveal). Spent in the Gem Shop. Exact amounts are in `DATA-REFERENCE.md`.
-- **Auto-Throw:** after buying it, an AUTO toggle appears under the throw meter; while on, you throw by yourself at a fixed mid band.
+- **Step-on Pull-up training:** walk within 6 studs of your own bar's `TrainSpot` to auto-start looping pull-ups (jump or walk away to stop; re-arms after walking out past 9 studs). Press E at your bar to upgrade the bar tier. Rep speed depends on strength and bar tier (1.6 s down to 0.35 s). Each rep adds Training XP (`floor(10 * level^1.35)` per level, +5 Throw Power per Strength Level), with an XP bar, "LEVEL UP! +5 POWER" popups, and server-offered "BONUS REP!" (3x XP) buttons every 4-6 s.
+- **Upgrades (`⬆️`, left column):** 3 tabs with dedicated tab headers: **⚡ Power & Training** (Throw Power Buy + Buy Max, Pull-Up Bar Tier, x2 Training Power), **🥕 Bait & Plot** (5 Jelly Bait tiers up to 4.00x luck, +4 Slots, x2 Cash), and **💎 Gem Upgrades** (Auto-Throw, Lucky Charm, +4 Slots).
+- **Robux Shop (`R$`, left column):** Robux-only Featured Eggs (`Enchanted Egg [New!]` & `Rainbow Egg [LIMITED]` with 3D slime odds previews), Game Passes (`x2 Luck`, `x2 Cash`, `VIP`), Robux Gem Packs (`100 / 550 / 1,200 / 2,600 Gems`), and the one-time Free Bonus Slime Gift. Backed by `MonetizationService.luau` with receipt deduplication and immediate save.
+- **Rewards & Quests (`🎁`, right column):** Manual 7-day daily login calendar with reset countdown, 12-step linear Quest Line, and 3 deterministic Daily Quests per UTC day. Shows a red `"!"` badge whenever something is ready to claim.
+- **Saving:** progress autosaves every 60 s, when you leave, and on server shutdown (`DataService.luau`, `ProfileSerializer.luau`).
+- **Auto-Throw:** after buying it with Gems, an AUTO toggle appears under the throw meter; while on, you throw by itself at a fixed mid band.
 
 ### What is not built yet
 
+- **Live Robux Asset IDs:** `ProductId` and `PassId` fields in `GameConfig.luau` are `0` ("Coming soon") until created in Roblox Creator Dashboard.
 - **Evolve/absorb system from the 2026-11-19 entry:** design only, no code.
-- **Robux purchases:** gem packs and passes need real developer product ids.
 - **Save session locking:** if a player rejoins another server within seconds, that server could read the older save.
-- **Sound, phone layout, settings** (including a toggle to turn camera shake off), tutorial beyond one line of text, a daily reward calendar screen.
-- **Training screen:** the XP bar and level-up popup exist, but nothing shows a rep count or seconds per rep while hanging.
+- **Sound, phone layout, settings** (including a toggle to turn camera shake off).
 
 ### UI status (for the designer)
 
-The Shop, Slime Index, Slimes window, pull-up bar label and HUD are programmer placeholders: flat frames, emoji icons, text-only buttons. The logic behind each one works, so they can be redesigned freely as long as they keep the same information and actions. Priority order: Shop, then the training screen, then the Index, then the HUD. The throw meter and reveal are the closest to final.
+The Shop, Upgrades, Rewards, Slime Index, Slimes window, pull-up bar label and HUD use functional `UiKit` bevel/gloss styling and are ready for a final art pass whenever needed.
 
 ### Known issues
 
-- Some prices show a double dollar sign (for example `$$25`). This is a known text bug and will be fixed in code, so don't design around it.
 - Old leftover scripts (`Server`, `Client`) may still sit inside the place file and could interfere. They need checking in Studio.
-- Economy numbers (costs, XP per rep, bait prices, cash per stud) are a first pass and untuned.
-- Git: commit `c681014` already contains about half of the power-system work. The rest of the power system, plus saving and Gems, is uncommitted.
-- `UI-DATA-CONTRACT.md` and `SYSTEMS-STATUS.md` now cover Gems and saving. `GAME-OVERVIEW.md` still describes "+power per rep" and doesn't mention bait, Bonus Reps or Gems.
+- Economy numbers (costs, XP per rep, bait prices, cash per stud, Robux prices) are a first pass and can be tuned in `GameConfig.luau`.
+- `GAME-OVERVIEW.md` still describes "+power per rep" and doesn't mention bait, Bonus Reps, Gems, or Quests yet.
 - To test saving in Studio: the experience owner turns on File > Experience Settings > Security > "Enable Studio Access to API Services" (collaborators can't change it). Without it, saving switches itself off with one warning in the Output.
 
 ### Where the details are
 
-The full hand-off is in the repo under `docs/docs/`: `UI-HANDOFF.md` (screen by screen), `UI-DATA-CONTRACT.md` (what each screen can read and do), `DATA-REFERENCE.md` (auto-generated names, numbers and colours), `GAME-OVERVIEW.md`, `SYSTEMS-STATUS.md`, and `POWER-SYSTEM-PLAN.md` (the spec the power system was built from).
+The full hand-off is in the repo under `docs/docs/`: `UI-HANDOFF.md` (screen by screen), `UI-DATA-CONTRACT.md` (what each screen can read and do), `DATA-REFERENCE.md` (auto-generated names, numbers and colours), `GAME-OVERVIEW.md`, `SYSTEMS-STATUS.md`, `UI-PLAN.md`, and `POWER-SYSTEM-PLAN.md`.

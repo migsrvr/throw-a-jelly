@@ -91,8 +91,60 @@ function ThrowPhysics.ComputeLaunchSpeed(throwPower: number, chargeRatio: number
 	local charge = math.clamp(chargeRatio, 0.15, 1.0)
 	local weight = math.clamp(slimeWeight or 1.0, 0.5, 2.0)
 
-	local rawSpeed = phys.BaseLaunchSpeed + phys.PowerSpeedScale * (p ^ phys.PowerExponent)
+	local knots = phys.PowerSpeedKnots
+	local rawSpeed = knots[#knots].Speed
+	if p <= knots[1].Power then
+		rawSpeed = knots[1].Speed
+	elseif p >= knots[#knots].Power then
+		-- Gentle diminishing tail above the highest calibrated knot (25K+)
+		rawSpeed = knots[#knots].Speed + 6.0 * math.log10(p / knots[#knots].Power)
+	else
+		for i = 1, #knots - 1 do
+			local a = knots[i]
+			local b = knots[i + 1]
+			if p >= a.Power and p <= b.Power then
+				local t = (math.log(p) - math.log(a.Power)) / (math.log(b.Power) - math.log(a.Power))
+				rawSpeed = a.Speed + (b.Speed - a.Speed) * t
+				break
+			end
+		end
+	end
 	return (rawSpeed * (0.35 + 0.65 * charge)) / weight
+end
+
+local function ensureAutoThrowBag(bag: { number }, rngFn: (() -> number)?)
+	local cfg = GameConfig.AutoThrow
+	if #bag == 0 then
+		for _ = 1, cfg.BagPerfectCount do
+			table.insert(bag, cfg.PerfectMeterRatio)
+		end
+		for _ = 1, cfg.BagGoodCount do
+			table.insert(bag, cfg.GoodMeterRatio)
+		end
+		local rng = rngFn or math.random
+		for i = #bag, 2, -1 do
+			local j = math.clamp(math.floor(rng() * i) + 1, 1, i)
+			bag[i], bag[j] = bag[j], bag[i]
+		end
+	end
+end
+
+-- Non-destructive peek at the next Auto-Throw target ratio so the client's visible vertical meter
+-- can smoothly glide and lock onto the exact Green / Light-Green band before releasing.
+function ThrowPhysics.PeekAutoThrowRatio(bag: { number }, rngFn: (() -> number)?): (number, boolean)
+	ensureAutoThrowBag(bag, rngFn)
+	local ratio = bag[#bag]
+	local seg = GameConfig.EvaluateMeterRatio(ratio)
+	return ratio, seg.IsPerfect == true
+end
+
+-- Shuffled 5-throw Auto-Throw bag: guarantees BagPerfectCount (3) PERFECT throws and BagGoodCount (2) GOOD
+-- throws in every 5-throw cycle in randomized order.
+function ThrowPhysics.NextAutoThrowRatio(bag: { number }, rngFn: (() -> number)?): (number, boolean)
+	ensureAutoThrowBag(bag, rngFn)
+	local ratio = table.remove(bag) :: number
+	local seg = GameConfig.EvaluateMeterRatio(ratio)
+	return ratio, seg.IsPerfect == true
 end
 
 function ThrowPhysics.Simulate(params: ThrowSimParams): ThrowSimResult
@@ -113,7 +165,7 @@ function ThrowPhysics.Simulate(params: ThrowSimParams): ThrowSimResult
 	local horizSpeed = launchSpeed * math.cos(pitchRad)
 	local vx = horizSpeed * math.sin(yawRad)
 	local vy = launchSpeed * math.sin(pitchRad)
-	local vz = horizSpeed * math.cos(pitchRad)
+	local vz = horizSpeed * math.cos(yawRad)
 
 	local gateZ, blockedByZone = ThrowPhysics.GetFirstLockedGate(throwPower)
 	local halfWidth = hub.ClearHalfWidth - 1.0
@@ -144,6 +196,7 @@ function ThrowPhysics.Simulate(params: ThrowSimParams): ThrowSimResult
 	for step = 1, maxSteps do
 		t = step * dt
 		local bouncedThisStep = false
+		local prevFloorY = ThrowPhysics.GetFloorYAtZ(math.max(0, z)) + 1.0
 
 		-- Exponential decay of squash effect
 		squash = squash * math.max(0, 1 - dt * 10)
@@ -200,20 +253,43 @@ function ThrowPhysics.Simulate(params: ThrowSimParams): ThrowSimResult
 			vz = 0
 		end
 
-		-- Floor collision
+		-- Solid vertical cliff wall collision between stepped zones (Z = 240, 480, 720, 960):
+		-- if the bait crosses forward onto a higher zone while BELOW its top surface, bonk softly off the
+		-- vertical cliff wall and stay on the lower terrain instead of teleporting +6 studs upward!
 		local floorY = ThrowPhysics.GetFloorYAtZ(math.max(0, nextZ)) + 1.0
+		if floorY > prevFloorY + 0.1 then
+			local stepZone = ThrowPhysics.GetZoneAtZ(math.max(0, nextZ))
+			local stepZ = stepZone.StartZ
+			local dz = nextZ - z
+			local frac = if dz > 1e-4 then math.clamp((stepZ - z) / dz, 0, 1) else 0
+			local yAtCliff = y + (nextY - y) * frac
+			if yAtCliff < floorY - 0.15 then
+				nextZ = stepZ - 0.6
+				vz = -math.min(math.abs(vz) * 0.20, 5.0)
+				vx *= 0.5
+				squash = 0.35
+				bouncedThisStep = true
+				floorY = prevFloorY
+			end
+		end
+
+		-- Floor collision
+		if isRolling and nextY > floorY + 0.05 then
+			isRolling = false
+		end
 		if nextY <= floorY then
 			nextY = floorY
 			if not isRolling then
-				if math.abs(vy) > phys.BounceThresholdVy and bounces < phys.MaxBounces then
+				if vy <= 0 and math.abs(vy) > phys.BounceThresholdVy and bounces < phys.MaxBounces then
 					bounces += 1
 					vy = math.abs(vy) * (phys.Restitution ^ (0.85 + 0.15 * bounces))
-					vx *= 0.86
-					vz *= 0.88
+					local horizDamp = phys.BounceHorizDamping or 0.18
+					vx *= horizDamp
+					vz *= horizDamp
 					squash = math.clamp(math.abs(vy) / 55, 0.2, 0.65)
 					bouncedThisStep = true
 					table.insert(bounceTimes, t)
-				else
+				elseif vy <= 0 then
 					isRolling = true
 					vy = 0
 					squash = 0.18

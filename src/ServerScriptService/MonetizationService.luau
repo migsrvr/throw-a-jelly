@@ -32,19 +32,41 @@ type GiftIntent = { Target: number, ProductId: number, Expires: number }
 local giftIntents: { [number]: GiftIntent } = {}
 local GIFT_INTENT_SECONDS = 180
 
-local function checkPlayerGamePasses(player: Player, profile: ProgressionLogic.PlayerProfile)
+local function pushProcessedReceipt(profile: ProgressionLogic.PlayerProfile, purchaseId: string)
+	profile.ProcessedReceipts = profile.ProcessedReceipts or {}
+	if not table.find(profile.ProcessedReceipts, purchaseId) then
+		table.insert(profile.ProcessedReceipts, purchaseId)
+		while #profile.ProcessedReceipts > GameConfig.Robux.MaxProcessedReceipts do
+			table.remove(profile.ProcessedReceipts, 1)
+		end
+	end
+end
+
+local function checkPlayerGamePasses(player: Player, profile: ProgressionLogic.PlayerProfile, syncIfChanged: boolean?)
 	local changed = false
+	local allOk = true
 	for _, pass in GameConfig.Robux.Passes do
 		if pass.PassId > 0 and not profile.OwnedPasses[pass.Id] then
 			local ok, owns = pcall(MarketplaceService.UserOwnsGamePassAsync, MarketplaceService, player.UserId, pass.PassId)
-			if ok and owns == true then
+			if not ok then
+				allOk = false
+			elseif owns == true then
 				profile.OwnedPasses[pass.Id] = true
 				changed = true
 			end
 		end
 	end
-	if changed and player.Parent then
+	if allOk then
+		checkedPassesForPlayer[player] = true
+	end
+	if syncIfChanged and changed and player.Parent then
 		PlayerStateService.Sync(player)
+	end
+end
+
+function MonetizationService.CheckPasses(player: Player, profile: ProgressionLogic.PlayerProfile)
+	if not checkedPassesForPlayer[player] then
+		checkPlayerGamePasses(player, profile, false)
 	end
 end
 
@@ -71,8 +93,19 @@ local function processReceipt(receiptInfo: {
 
 	-- Welcome Back "2X" developer product
 	if GameConfig.Offline.DoubleProductId > 0 and receiptInfo.ProductId == GameConfig.Offline.DoubleProductId then
-		if PlayerStateService.ClaimOffline(player, 2) then
-			table.insert(profile.ProcessedReceipts, purchaseId)
+		local claimed, claimedAmount, awaySeconds = PlayerStateService.ClaimOffline(player, 2)
+		if claimed then
+			pushProcessedReceipt(profile, purchaseId)
+			if DataService.CanSave(player) and not DataService.Save(player, profile) then
+				profile.Cash = math.max(0, profile.Cash - claimedAmount)
+				local idx = table.find(profile.ProcessedReceipts, purchaseId)
+				if idx then
+					table.remove(profile.ProcessedReceipts, idx)
+				end
+				PlayerStateService.RestoreOfflineOffer(player, math.floor(claimedAmount / 2), awaySeconds)
+				PlayerStateService.Sync(player)
+				return Enum.ProductPurchaseDecision.NotProcessedYet
+			end
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		end
 		return Enum.ProductPurchaseDecision.NotProcessedYet
@@ -87,8 +120,13 @@ local function processReceipt(receiptInfo: {
 	-- Gift: grant to the target player's profile when a valid intent exists, otherwise to the buyer
 	local intent = giftIntents[receiptInfo.PlayerId]
 	local recipient: Player? = nil
-	if intent and intent.ProductId == receiptInfo.ProductId and os.time() <= intent.Expires then
+	local hasActiveGiftIntent = intent ~= nil and intent.ProductId == receiptInfo.ProductId and os.time() <= intent.Expires
+	if hasActiveGiftIntent and intent then
 		recipient = Players:GetPlayerByUserId(intent.Target)
+		if not recipient or not PlayerStateService.GetProfile(recipient) then
+			PlayerStateService.Toast(player, "Gift recipient left the server before receipt completed; retrying...", "warn")
+			return Enum.ProductPurchaseDecision.NotProcessedYet
+		end
 	end
 	local recipientProfile = if recipient then PlayerStateService.GetProfile(recipient) else nil
 	local grantPlayer: Player = if recipient and recipientProfile then recipient else player
@@ -119,17 +157,18 @@ local function processReceipt(receiptInfo: {
 	end
 
 	-- A gift is also recorded on the buyer's receipts so a retried callback is recognised
-	if isGift and not table.find(profile.ProcessedReceipts, purchaseId) then
-		table.insert(profile.ProcessedReceipts, purchaseId)
+	if isGift then
+		pushProcessedReceipt(profile, purchaseId)
 	end
 
-	-- Save immediately before returning PurchaseGranted when saving is active for this session
+	-- Save immediately before returning PurchaseGranted when saving is active for this session.
+	-- Save the recipient first so the gift is persisted before the buyer's deduplication receipt is committed.
 	local savedAll = true
-	if DataService.CanSave(player) then
-		savedAll = DataService.Save(player, profile)
-	end
-	if savedAll and isGift and DataService.CanSave(grantPlayer) then
+	if isGift and DataService.CanSave(grantPlayer) then
 		savedAll = DataService.Save(grantPlayer, grantProfile)
+	end
+	if savedAll and DataService.CanSave(player) then
+		savedAll = DataService.Save(player, profile)
 	end
 	if not savedAll then
 		-- Roll back in-memory grant so Roblox retries ProcessReceipt cleanly
@@ -192,6 +231,7 @@ end
 
 function MonetizationService.Init()
 	MarketplaceService.ProcessReceipt = processReceipt
+	PlayerStateService.SetPassChecker(MonetizationService.CheckPasses)
 
 	Remotes.GetEvent("RequestGift").OnServerEvent:Connect(function(player: Player, payload: any)
 		local productId = startGift(player, payload)
@@ -202,8 +242,7 @@ function MonetizationService.Init()
 
 	PlayerStateService.OnProfileChanged(function(player: Player, profile: ProgressionLogic.PlayerProfile)
 		if not checkedPassesForPlayer[player] then
-			checkedPassesForPlayer[player] = true
-			checkPlayerGamePasses(player, profile)
+			checkPlayerGamePasses(player, profile, true)
 		end
 	end)
 

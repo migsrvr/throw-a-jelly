@@ -49,29 +49,29 @@ local TEAL: UiKit.Tri = UiKit.Gradients.RewardsNav
 local TABS: { TabSpec } = {
 	{
 		Key = "Power",
-		Text = "Power & Training",
+		Text = "Power & Bars",
 		Icon = "bolt",
 		Tone = UiKit.Gradients.Blue,
-		Title = "Power & Training",
-		Tagline = "Raise your Throw Power, Pull-Up Bar tier and training speed!",
-		Items = { "power_upgrade", "pullup_tier", "boost_double_power" },
+		Title = "Power & Pull-Up Bars",
+		Tagline = "Spend Cash to raise Throw Power and upgrade your Pull-Up Bar!",
+		Items = { "power_upgrade", "pullup_tier" },
 	},
 	{
 		Key = "Bait",
-		Text = "Bait & Plot",
+		Text = "Jelly Bait",
 		Icon = "carrot",
 		Tone = UiKit.Gradients.Orange,
-		Title = "Bait & Plot",
-		Tagline = "Better Jelly Bait luck, more plot slots and 2x Cash income!",
-		Items = { "bait_tier", "slot_expansion", "boost_double_cash" },
+		Title = "Jelly Bait Quality",
+		Tagline = "Upgrade Jelly Bait with Cash to multiply rarity & Rainbow luck!",
+		Items = { "bait_tier" },
 	},
 	{
 		Key = "Gem",
 		Text = "Gem Upgrades",
 		Icon = "gem",
 		Tone = TEAL,
-		Title = "Gem Upgrades",
-		Tagline = "Permanent premium unlocks, paid with Gems!",
+		Title = "Gem Upgrades (Long Grind)",
+		Tagline = "Permanent 2x-10x multipliers, Auto-Throw & Plot Slots 9-12!",
 		Items = {}, -- filled from the catalog (Category = "Gem")
 	},
 }
@@ -80,13 +80,13 @@ local TABS: { TabSpec } = {
 local ITEM_ICONS: { [string]: string } = {
 	power_upgrade = "bolt",
 	pullup_tier = "lifter",
-	boost_double_power = "power",
 	bait_tier = "carrot",
-	slot_expansion = "basket",
-	boost_double_cash = "cash",
+	gem_slot_unlock = "basket",
 	gem_auto_throw = "robot",
-	gem_lucky_charm = "clover",
-	gem_slot_expansion = "basket",
+	gem_money_2x = "cash",
+	gem_gems_tier = "gem",
+	gem_power_tier = "power",
+	gem_luck_tier = "clover",
 }
 
 local CARD_TONE: UiKit.Tri = {
@@ -207,9 +207,10 @@ function UpgradesWindow.Build(parent: Instance, ctx: UpgradesWindowContext): Upg
 	end)
 	tabs.Frame.Position = UDim2.fromOffset(0, 0)
 
+	local gemItems: { string } = {}
 	for _, item in GameConfig.ShopCatalog do
 		if item.Category == "Gem" then
-			table.insert(TABS[3].Items, item.Id)
+			table.insert(gemItems, item.Id)
 		end
 	end
 
@@ -394,7 +395,8 @@ function UpgradesWindow.Build(parent: Instance, ctx: UpgradesWindowContext): Upg
 
 	for _, spec in TABS do
 		local page = makePage(spec.Key)
-		for order, itemId in spec.Items do
+		local items = if spec.Key == "Gem" then gemItems else spec.Items
+		for order, itemId in items do
 			buildRow(page, itemId, order)
 		end
 	end

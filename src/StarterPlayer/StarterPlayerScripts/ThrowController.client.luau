@@ -32,12 +32,11 @@ local UiAssets = require(Shared:WaitForChild("UiAssets"))
 local requestThrow = Remotes.GetEvent("RequestThrow")
 local throwBroadcast = Remotes.GetEvent("ThrowBroadcast")
 
-print("[ThrowController] loaded pitch-v3")
-
 local isAtThrowLine = false
 local isThrowInFlight = false
 local isPitchAnimating = false -- true while the local avatar's pitch animation is still playing
 local inRevealCutscene = false
+local activeThrowToken = 0
 local meterClock = 0
 local currentMeterRatio = 0.5
 local lastThrowTime = 0
@@ -122,7 +121,7 @@ sliderBar.Position = UDim2.fromScale(0.5, 0.5)
 sliderBar.Size = UDim2.fromOffset(78, 16)
 sliderBar.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 sliderBar.ZIndex = 5
-sliderBar.Parent = pillOuter
+sliderBar.Parent = segmentsContainer
 addCorner(sliderBar, 8)
 addStroke(sliderBar, Color3.fromRGB(18, 20, 28), 2.8, Enum.ApplyStrokeMode.Border)
 
@@ -130,13 +129,13 @@ local sliderBonusLabel = Instance.new("TextLabel")
 sliderBonusLabel.Name = "BonusLabel"
 sliderBonusLabel.AnchorPoint = Vector2.new(0, 0.5)
 sliderBonusLabel.Position = UDim2.new(1, 10, 0.5, 0)
-sliderBonusLabel.Size = UDim2.fromOffset(110, 50)
+sliderBonusLabel.Size = UDim2.fromOffset(230, 50)
 sliderBonusLabel.BackgroundTransparency = 1
 sliderBonusLabel.Font = Enum.Font.FredokaOne
-sliderBonusLabel.TextSize = 44
+sliderBonusLabel.TextSize = 26
 sliderBonusLabel.TextXAlignment = Enum.TextXAlignment.Left
 sliderBonusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-sliderBonusLabel.Text = "+11"
+sliderBonusLabel.Text = "OK 1.15x"
 sliderBonusLabel.ZIndex = 6
 sliderBonusLabel.Parent = sliderBar
 UiKit.AddTextStroke(sliderBonusLabel)
@@ -152,18 +151,20 @@ tapPromptLabel.Font = Enum.Font.FredokaOne
 tapPromptLabel.TextSize = 34
 tapPromptLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 -- Hint wording per input device (spec section 3)
-tapPromptLabel.Text = if UiKit.IsPhone()
+local defaultTapPromptText = if UiKit.IsPhone()
 	then "TAP TO THROW!"
 	elseif UserInputService.GamepadEnabled and not UserInputService.KeyboardEnabled then "PRESS A TO THROW!"
 	else "CLICK TO THROW!"
+tapPromptLabel.Text = defaultTapPromptText
 tapPromptLabel.Parent = meterRoot
 UiKit.AddTextStroke(tapPromptLabel)
 
--- Auto-Throw toggle (Gem unlock "auto_throw"): shown at the throw line once owned. While ON, the
--- controller throws by itself after AutoThrow.IdleDelaySeconds idle, at the fixed AutoThrow meter ratio.
+-- Auto-Throw toggle (Gem unlock "auto_throw" OR Robux Pass "pass_auto_throw"): shown at the throw line once owned.
+-- While ON, the vertical meter stays VISIBLE and smoothly locks onto the exact server-peeked Green/Light-Green band!
 local ownsAutoThrow = false
 local autoThrowEnabled = false
 local autoIdleClock = 0
+local nextAutoMeterRatio = GameConfig.AutoThrow.PerfectMeterRatio
 
 -- AUTO toggle (spec section 3): dark gradient pill, "AUTO" + 58x32 track (green when on) with a sliding knob.
 local autoThrowButton = Instance.new("TextButton")
@@ -234,8 +235,13 @@ autoThrowButton.Activated:Connect(function()
 end)
 
 Remotes.GetEvent("PlayerStateSync").OnClientEvent:Connect(function(state: any)
-	if type(state) == "table" and type(state.OwnedBoosts) == "table" then
-		ownsAutoThrow = state.OwnedBoosts.auto_throw == true
+	if type(state) == "table" then
+		local boosts = if type(state.OwnedBoosts) == "table" then state.OwnedBoosts else {}
+		local passes = if type(state.OwnedPasses) == "table" then state.OwnedPasses else {}
+		ownsAutoThrow = (boosts.auto_throw == true) or (passes.pass_auto_throw == true)
+		if type(state.NextAutoMeterRatio) == "number" then
+			nextAutoMeterRatio = math.clamp(state.NextAutoMeterRatio, 0, 1)
+		end
 		if not ownsAutoThrow then
 			autoThrowEnabled = false
 			refreshAutoThrowButton()
@@ -481,13 +487,13 @@ UiKit.AddTextStroke(newBadgeText)
 local tapContinueLabel = Instance.new("TextLabel")
 tapContinueLabel.AnchorPoint = Vector2.new(0.5, 1)
 tapContinueLabel.Position = UDim2.new(0.5, 0, 1, 0)
-tapContinueLabel.Size = UDim2.fromOffset(260, 28)
+tapContinueLabel.Size = UDim2.fromOffset(380, 28)
 tapContinueLabel.BackgroundTransparency = 1
 tapContinueLabel.Font = Enum.Font.FredokaOne
 tapContinueLabel.TextSize = 22
 tapContinueLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 tapContinueLabel.TextTransparency = 0.15
-tapContinueLabel.Text = if UiKit.IsPhone() then "tap to continue" else "click to continue"
+tapContinueLabel.Text = if UiKit.IsPhone() then "Tap to continue (3s)" else "Click to continue (3s)"
 tapContinueLabel.Parent = finalInfoFrame
 
 local function playShockwaveRings()
@@ -559,30 +565,37 @@ local function checkNearThrowLine(): boolean
 	return nearZ and nearY and nearX
 end
 
--- Bold golden "PERFECT! +20" pop above the throw meter when the slider stops in the top band
-local function showPerfectCallout(bonusPower: number)
+-- Bold quality callout matching the exact meter band where the throw locked (WEAK -> OK -> GOOD -> GREAT! -> PERFECT!)
+local function showThrowQualityCallout(qualityLabel: string, luckMult: number, colorRgb: { number }?, isPerfect: boolean)
 	local label = Instance.new("TextLabel")
-	label.Name = "PerfectCallout"
+	label.Name = if isPerfect then "PerfectCallout" else "QualityCallout"
 	label.AnchorPoint = Vector2.new(0.5, 0.5)
 	label.Position = UDim2.new(0.5, 0, 0.48, -200)
-	label.Size = UDim2.fromOffset(420, 80)
+	label.Size = UDim2.fromOffset(500, 80)
 	label.BackgroundTransparency = 1
 	label.Font = Enum.Font.FredokaOne
-	label.TextSize = 64
+	label.TextSize = if isPerfect then 64 else 48
 	label.TextColor3 = Color3.fromRGB(255, 255, 255)
-	label.Text = `PERFECT! +{bonusPower}`
-	label.Rotation = -6
+	label.Text = string.format("%s %.2fx", qualityLabel, luckMult)
+	label.Rotation = if isPerfect then -6 else -3
 	label.ZIndex = 15
 	label.Parent = throwGui
-	UiKit.ApplyTri(label, UiKit.Gradients.Luck)
+	local tone = if isPerfect
+		then UiKit.Gradients.Luck
+		elseif colorRgb then UiKit.TriFromColor(SlimeFactory.ToColor3(colorRgb), 0.45, 0.25)
+		else UiKit.Gradients.Green
+	UiKit.ApplyTri(label, tone)
 	UiKit.AddTextStroke(label)
 
-	-- PERFECT moment (spec section 3): pop 1.4 -> 1 with Back easing, flash the pill outline gold
+	-- Pop 1.4 -> 1 with Back easing, flash pill outline
 	local scale = Instance.new("UIScale")
 	scale.Scale = 1.4
 	scale.Parent = label
 	TweenService:Create(scale, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
-	pillStroke.Color = UiKit.Colors.Gold
+	pillStroke.Color = if isPerfect
+		then UiKit.Colors.Gold
+		elseif colorRgb then SlimeFactory.ToColor3(colorRgb)
+		else UiKit.Colors.Green
 	task.delay(0.5, function()
 		pillStroke.Color = Color3.fromRGB(18, 20, 28)
 	end)
@@ -595,8 +608,33 @@ local function showPerfectCallout(bonusPower: number)
 	end)
 end
 
+local function resetThrowState()
+	activeThrowToken += 1
+	isThrowInFlight = false
+	isPitchAnimating = false
+	inRevealCutscene = false
+	flightHud.Visible = false
+	revealRoot.Visible = false
+	fadeOverlay.BackgroundTransparency = 1
+	localPlayer:SetAttribute("InThrow", false)
+	localPlayer:SetAttribute("InRevealCutscene", false)
+	CharacterAnimator.StopAimPose()
+	if (localPlayer:GetAttribute("InTraining") :: boolean?) ~= true then
+		local cam = workspace.CurrentCamera
+		if cam then
+			cam.CameraType = Enum.CameraType.Custom
+		end
+	end
+end
+
+localPlayer.CharacterRemoving:Connect(resetThrowState)
+localPlayer.CharacterAdded:Connect(resetThrowState)
+
 local function triggerThrowFromMeter(isAuto: boolean?)
 	if isThrowInFlight or inRevealCutscene then
+		return
+	end
+	if (localPlayer:GetAttribute("ModalOpen") :: boolean?) == true then
 		return
 	end
 	local now = os.clock()
@@ -604,16 +642,18 @@ local function triggerThrowFromMeter(isAuto: boolean?)
 		return
 	end
 	lastThrowTime = now
+	activeThrowToken += 1
+	local myToken = activeThrowToken
 	isThrowInFlight = true
 	localPlayer:SetAttribute("InThrow", true)
 	meterRoot.Visible = false
 	autoThrowButton.Visible = false
 
-	-- Auto throws always stop at the fixed AutoThrow ratio (the server enforces the same value)
+	-- Auto throws draw their PERFECT/GREAT outcome from the server's shuffled 5-throw bag (callout fires on ThrowBroadcast)
 	local lockedRatio = if isAuto then GameConfig.AutoThrow.MeterRatio else currentMeterRatio
-	local lockedSeg = GameConfig.EvaluateMeterRatio(lockedRatio)
-	if lockedSeg.IsPerfect then
-		showPerfectCallout(lockedSeg.BonusPower)
+	if not isAuto then
+		local lockedSeg = GameConfig.EvaluateMeterRatio(lockedRatio)
+		showThrowQualityCallout(lockedSeg.QualityLabel, lockedSeg.LuckMultiplier, lockedSeg.Color, lockedSeg.IsPerfect == true)
 	end
 	local char = localPlayer.Character
 	local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
@@ -640,15 +680,17 @@ local function triggerThrowFromMeter(isAuto: boolean?)
 			YawDeg = 0,
 			Auto = isAuto == true,
 		})
+		-- Watchdog: if the server drops or rejects the throw, recover the camera so the player never soft-locks
+		task.delay(4.0, function()
+			if activeThrowToken == myToken and isThrowInFlight and not inRevealCutscene then
+				resetThrowState()
+			end
+		end)
 	end, function()
 		isPitchAnimating = false
 		-- Pitch was cut short (e.g. character reset) before release: unlock the throw line again
-		if not releaseSent then
-			isThrowInFlight = false
-			localPlayer:SetAttribute("InThrow", false)
-			if cam then
-				cam.CameraType = Enum.CameraType.Custom
-			end
+		if not releaseSent and activeThrowToken == myToken then
+			resetThrowState()
 		end
 	end)
 end
@@ -659,6 +701,7 @@ UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: 
 			input.UserInputType == Enum.UserInputType.MouseButton1
 			or input.UserInputType == Enum.UserInputType.Touch
 			or input.KeyCode == Enum.KeyCode.Space
+			or input.KeyCode == Enum.KeyCode.ButtonA
 		then
 			revealTapSignal:Fire()
 		end
@@ -669,13 +712,19 @@ UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: 
 		return
 	end
 
+	if (localPlayer:GetAttribute("ModalOpen") :: boolean?) == true then
+		return
+	end
+
 	if
 		isAtThrowLine
 		and not isThrowInFlight
+		and not (ownsAutoThrow and autoThrowEnabled)
 		and (
 			input.UserInputType == Enum.UserInputType.MouseButton1
 			or input.UserInputType == Enum.UserInputType.Touch
 			or input.KeyCode == Enum.KeyCode.Space
+			or input.KeyCode == Enum.KeyCode.ButtonA
 		)
 	then
 		triggerThrowFromMeter()
@@ -811,173 +860,224 @@ local function animateSlowHopTowardBait(
 	)
 end
 
+-- Casts from lookTarget -> desiredPos so the reveal camera never clips inside a zone cliff or prop
+local function safeRevealCamCFrame(desiredPos: Vector3, lookTarget: Vector3, exclude: { Instance }): CFrame
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = exclude
+	local dir = desiredPos - lookTarget
+	local dist = dir.Magnitude
+	if dist > 0.5 then
+		local hit = workspace:Raycast(lookTarget, dir, params)
+		if hit then
+			local safeDist = math.max(4.5, (hit.Position - lookTarget).Magnitude - 0.8)
+			desiredPos = lookTarget + dir.Unit * safeDist
+		end
+	end
+	return CFrame.lookAt(desiredPos, lookTarget)
+end
+
 local function runRevealCutscene(finalPos: Vector3, baitModel: Model, payload: any)
 	inRevealCutscene = true
 	localPlayer:SetAttribute("InRevealCutscene", true)
 	flightHud.Visible = false
 
-	TweenService:Create(fadeOverlay, TweenInfo.new(0.22), { BackgroundTransparency = 0 }):Play()
-	task.wait(0.24)
-
-	local floorY = ThrowPhysics.GetFloorYAtZ(math.max(0, finalPos.Z))
-	local baitGroundPos = Vector3.new(finalPos.X + 1.5, floorY + 0.55, finalPos.Z)
-
-	-- 6 waypoints (Emergence at 10.5 studs away + 5 slow hops right up to the thrown bait!)
-	local hopWaypoints = {
-		Vector3.new(finalPos.X - 9.0, floorY + 1.22, finalPos.Z - 1.4), -- 1. Emergence spot
-		Vector3.new(finalPos.X - 7.1, floorY + 1.22, finalPos.Z - 1.1), -- 2. After Hop 1
-		Vector3.new(finalPos.X - 5.3, floorY + 1.22, finalPos.Z - 0.8), -- 3. After Hop 2
-		Vector3.new(finalPos.X - 3.7, floorY + 1.22, finalPos.Z - 0.5), -- 4. After Hop 3
-		Vector3.new(finalPos.X - 2.3, floorY + 1.22, finalPos.Z - 0.3), -- 5. After Hop 4
-		Vector3.new(finalPos.X - 1.1, floorY + 1.22, finalPos.Z - 0.1), -- 6. After Hop 5 (right beside the bait!)
-	}
-
-	SlimeFactory.PositionBait(baitModel, CFrame.new(baitGroundPos) * CFrame.Angles(0, math.rad(35), 0))
-
-	local slimeId = payload.CaughtSlimeId or "meadow_sprout"
-	local mutId = payload.CaughtMutation or "NORMAL"
-	local slimeModel = SlimeFactory.CreateSlimeModel(slimeId, false, mutId, payload.CaughtIncomePerSec)
-	SlimeFactory.SetSilhouetteMode(slimeModel, true)
-	SlimeFactory.PositionSlime(
-		slimeModel,
-		CFrame.lookAt(
-			Vector3.new(hopWaypoints[1].X, floorY - 2.7, hopWaypoints[1].Z),
-			Vector3.new(baitGroundPos.X, floorY - 2.7, baitGroundPos.Z)
-		),
-		0
-	)
-	slimeModel.Parent = workspace
-
+	local slimeModel: Model? = nil
 	local cam = workspace.CurrentCamera
-	if cam then
-		cam.CameraType = Enum.CameraType.Scriptable
-		local camPos = Vector3.new(finalPos.X - 2.4, floorY + 3.6, finalPos.Z + 11.2)
-		local lookTarget = Vector3.new(finalPos.X - 2.8, floorY + 1.1, finalPos.Z - 0.3)
-		cam.CFrame = CFrame.lookAt(camPos, lookTarget)
-	end
 
-	local targetOdds = math.max(1, tonumber(payload.OddsOneInX) or 4)
-	local shortWord = tostring(payload.CaughtShortWord or "SLIME")
-	superLuckyLabel.Visible = false
-	finalInfoFrame.Visible = false
-	oddsLabel.Text = "1 in 1"
-	revealRoot.Visible = true
+	local ok, err = pcall(function()
+		TweenService:Create(fadeOverlay, TweenInfo.new(0.22), { BackgroundTransparency = 0 }):Play()
+		task.wait(0.24)
 
-	TweenService:Create(fadeOverlay, TweenInfo.new(0.25), { BackgroundTransparency = 1 }):Play()
+		local landedZone = ThrowPhysics.GetZoneAtZ(math.max(0, finalPos.Z))
+		local floorY = landedZone.FloorY
+		-- Clamp staging strictly inside the open lane corridor and away from cliff walls
+		local stageX = math.clamp(finalPos.X, -(landedZone.ClearHalfWidth - 11), landedZone.ClearHalfWidth - 4)
+		local stageZ = math.clamp(finalPos.Z, landedZone.StartZ + 3.0, landedZone.EndZ - 3.0)
+		-- If near the far cliff edge of a zone (or Zone 5 end wall), flip camera to the open -Z side!
+		local camSideZ = if stageZ > landedZone.EndZ - 14.0 then -1 else 1
+		local emergeDz = if camSideZ > 0 then -1 else 1
 
-	-- STAGE A: Longer (~1.70s) Slow Underground Peek & Pop-Out!
-	animateLongerUndergroundEmergence(slimeModel, hopWaypoints[1], floorY, baitGroundPos)
+		local baitGroundPos = Vector3.new(stageX + 1.5, floorY + 0.55, stageZ)
 
-	-- STAGE B: 5 slow, unhurried hops creeping toward the thrown Jelly Bait (~2.85s)!
-	local oddsSteps = {
-		math.max(1, math.floor(targetOdds * 0.12)),
-		math.max(1, math.floor(targetOdds * 0.26)),
-		math.max(1, math.floor(targetOdds * 0.45)),
-		math.max(1, math.floor(targetOdds * 0.68)),
-		math.max(1, math.floor(targetOdds * 0.88)),
-	}
+		-- 6 waypoints (Emergence at 10.5 studs away + 5 slow hops right up to the thrown bait!)
+		local hopWaypoints = {
+			Vector3.new(stageX - 9.0, floorY + 1.22, stageZ + 1.4 * emergeDz), -- 1. Emergence spot
+			Vector3.new(stageX - 7.1, floorY + 1.22, stageZ + 1.1 * emergeDz), -- 2. After Hop 1
+			Vector3.new(stageX - 5.3, floorY + 1.22, stageZ + 0.8 * emergeDz), -- 3. After Hop 2
+			Vector3.new(stageX - 3.7, floorY + 1.22, stageZ + 0.5 * emergeDz), -- 4. After Hop 3
+			Vector3.new(stageX - 2.3, floorY + 1.22, stageZ + 0.3 * emergeDz), -- 5. After Hop 4
+			Vector3.new(stageX - 1.1, floorY + 1.22, stageZ + 0.1 * emergeDz), -- 6. After Hop 5 (right beside the bait!)
+		}
 
-	for step = 1, 5 do
-		oddsLabel.Text = `1 in {oddsSteps[step]}`
+		SlimeFactory.PositionBait(baitModel, CFrame.new(baitGroundPos) * CFrame.Angles(0, math.rad(35), 0))
 
-		if cam then
-			local targetCamPos = Vector3.new(
-				finalPos.X - 2.2 + step * 0.36,
-				floorY + 3.5 - step * 0.08,
-				finalPos.Z + 10.8 - step * 0.45
-			)
-			local targetLook = Vector3.new(finalPos.X - 2.4 + step * 0.38, floorY + 1.15, finalPos.Z)
-			TweenService:Create(cam, TweenInfo.new(0.46, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
-				CFrame = CFrame.lookAt(targetCamPos, targetLook),
-			}):Play()
+		local slimeId = payload.CaughtSlimeId or "meadow_sprout"
+		local mutId = payload.CaughtMutation or "NORMAL"
+		local createdSlime = SlimeFactory.CreateSlimeModel(slimeId, false, mutId, payload.CaughtIncomePerSec)
+		slimeModel = createdSlime
+		SlimeFactory.SetSilhouetteMode(createdSlime, true)
+		SlimeFactory.PositionSlime(
+			createdSlime,
+			CFrame.lookAt(
+				Vector3.new(hopWaypoints[1].X, floorY - 2.7, hopWaypoints[1].Z),
+				Vector3.new(baitGroundPos.X, floorY - 2.7, baitGroundPos.Z)
+			),
+			0
+		)
+		createdSlime.Parent = workspace
+
+		local rayExclude: { Instance } = { createdSlime, baitModel }
+		if localPlayer.Character then
+			table.insert(rayExclude, localPlayer.Character)
 		end
 
-		animateSlowHopTowardBait(
-			slimeModel,
-			hopWaypoints[step],
-			hopWaypoints[step + 1],
-			baitGroundPos,
-			0.46,
-			step
-		)
+		if cam then
+			cam.CameraType = Enum.CameraType.Scriptable
+			local camPos = Vector3.new(stageX - 2.4, floorY + 3.6, stageZ + 11.2 * camSideZ)
+			local lookTarget = Vector3.new(stageX - 2.8, floorY + 1.1, stageZ + 0.3 * emergeDz)
+			cam.CFrame = safeRevealCamCFrame(camPos, lookTarget, rayExclude)
+		end
 
-		task.wait(0.12)
-	end
+		local targetOdds = math.max(1, tonumber(payload.OddsOneInX) or 4)
+		local shortWord = tostring(payload.CaughtShortWord or "SLIME")
+		superLuckyLabel.Visible = false
+		finalInfoFrame.Visible = false
+		oddsLabel.Text = "1 in 1"
+		revealRoot.Visible = true
 
-	-- Curious sniff lean toward the bait right before the burst!
-	local finalSlimePos = hopWaypoints[6]
-	SlimeFactory.PositionSlime(
-		slimeModel,
-		CFrame.lookAt(finalSlimePos + Vector3.new(0.35, 0, 0), baitGroundPos),
-		-0.15
-	)
-	task.wait(0.32)
+		TweenService:Create(fadeOverlay, TweenInfo.new(0.25), { BackgroundTransparency = 1 }):Play()
 
-	-- STAGE C: EXPLOSIVE REVEAL right next to the bait!
-	SlimeFactory.SetSilhouetteMode(slimeModel, false)
-	if cam then
-		SlimeFactory.PositionSlime(
-			slimeModel,
-			CFrame.lookAt(
-				finalSlimePos + Vector3.new(0, 0.5, 0),
-				Vector3.new(cam.CFrame.Position.X, finalSlimePos.Y, cam.CFrame.Position.Z)
-			),
-			-0.30
-		)
-		task.delay(0.15, function()
-			if slimeModel.Parent and cam then
-				SlimeFactory.PositionSlime(
-					slimeModel,
-					CFrame.lookAt(
-						finalSlimePos,
-						Vector3.new(cam.CFrame.Position.X, finalSlimePos.Y, cam.CFrame.Position.Z)
-					),
-					0.18
+		-- STAGE A: Longer (~1.70s) Slow Underground Peek & Pop-Out!
+		animateLongerUndergroundEmergence(createdSlime, hopWaypoints[1], floorY, baitGroundPos)
+
+		-- STAGE B: 5 slow, unhurried hops creeping toward the thrown Jelly Bait (~2.85s)!
+		local oddsSteps = {
+			math.max(1, math.floor(targetOdds * 0.12)),
+			math.max(1, math.floor(targetOdds * 0.26)),
+			math.max(1, math.floor(targetOdds * 0.45)),
+			math.max(1, math.floor(targetOdds * 0.68)),
+			math.max(1, math.floor(targetOdds * 0.88)),
+		}
+
+		for step = 1, 5 do
+			oddsLabel.Text = `1 in {oddsSteps[step]}`
+
+			if cam then
+				local targetCamPos = Vector3.new(
+					stageX - 2.2 + step * 0.36,
+					floorY + 3.5 - step * 0.08,
+					stageZ + (10.8 - step * 0.45) * camSideZ
 				)
+				local targetLook = Vector3.new(stageX - 2.4 + step * 0.38, floorY + 1.15, stageZ)
+				TweenService:Create(cam, TweenInfo.new(0.46, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+					CFrame = safeRevealCamCFrame(targetCamPos, targetLook, rayExclude),
+				}):Play()
 			end
+
+			animateSlowHopTowardBait(
+				createdSlime,
+				hopWaypoints[step],
+				hopWaypoints[step + 1],
+				baitGroundPos,
+				0.46,
+				step
+			)
+
+			task.wait(0.12)
+		end
+
+		-- Curious sniff lean toward the bait right before the burst!
+		local finalSlimePos = hopWaypoints[6]
+		SlimeFactory.PositionSlime(
+			createdSlime,
+			CFrame.lookAt(finalSlimePos + Vector3.new(0.35, 0, 0), baitGroundPos),
+			-0.15
+		)
+		task.wait(0.32)
+
+		-- STAGE C: EXPLOSIVE REVEAL right next to the bait!
+		SlimeFactory.SetSilhouetteMode(createdSlime, false)
+		if cam then
+			SlimeFactory.PositionSlime(
+				createdSlime,
+				CFrame.lookAt(
+					finalSlimePos + Vector3.new(0, 0.5, 0),
+					Vector3.new(cam.CFrame.Position.X, finalSlimePos.Y, cam.CFrame.Position.Z)
+				),
+				-0.30
+			)
+			task.delay(0.15, function()
+				if createdSlime.Parent and cam then
+					SlimeFactory.PositionSlime(
+						createdSlime,
+						CFrame.lookAt(
+							finalSlimePos,
+							Vector3.new(cam.CFrame.Position.X, finalSlimePos.Y, cam.CFrame.Position.Z)
+						),
+						0.18
+					)
+				end
+			end)
+		end
+
+		playShockwaveRings()
+
+		oddsLabel.Text = `1 in {targetOdds}`
+		superLuckyLabel.Visible = (payload.IsSuperLucky == true)
+
+		local def = GameConfig.SlimesById[slimeId] or GameConfig.Slimes[1]
+		local mutColor = if mutId ~= "NORMAL"
+			then SlimeFactory.GetMutationColor(mutId)
+			else SlimeFactory.GetRarityColor(def.Rarity)
+
+		mutationLabel.Text = if mutId ~= "NORMAL" then mutId else string.upper(def.Rarity)
+		applyTone(mutationLabel, UiKit.TriFromColor(mutColor, 0.6, 0.3))
+		revealedNameLabel.Text = shortWord
+		applyTone(revealedNameLabel, UiKit.TriFromColor(SlimeFactory.ToColor3(def.Color), 0.6, 0.3))
+		local gemsEarned = tonumber(payload.GemsEarned) or 0
+		revealedIncomeLabel.Text = `${GameConfig.FormatNumber(payload.CaughtIncomePerSec or def.IncomePerSec)}/s`
+		gemsLabel.Text = `+{gemsEarned}`
+		gemsRow.Visible = gemsEarned > 0
+		newBadge.Visible = (payload.IsNewDiscovery == true)
+		finalInfoFrame.Visible = true
+
+		-- Click/tap skips immediately, or auto-dismisses cleanly after 3.0s so AFK auto-throw keeps looping
+		local done = false
+		local doneConn = revealTapSignal.Event:Connect(function()
+			done = true
 		end)
-	end
+		local continuePrefix = if UiKit.IsPhone() then "Tap to continue" else "Click to continue"
+		local waitStart = os.clock()
+		local AUTO_DISMISS_SECONDS = 3.0
+		while not done do
+			local remaining = AUTO_DISMISS_SECONDS - (os.clock() - waitStart)
+			if remaining <= 0 then
+				break
+			end
+			tapContinueLabel.Text = `{continuePrefix} ({math.ceil(remaining)}s)`
+			task.wait(0.05)
+		end
+		doneConn:Disconnect()
 
-	playShockwaveRings()
-
-	oddsLabel.Text = `1 in {targetOdds}`
-	superLuckyLabel.Visible = (payload.IsSuperLucky == true)
-
-	local def = GameConfig.SlimesById[slimeId] or GameConfig.Slimes[1]
-	local mutColor = if mutId ~= "NORMAL"
-		then SlimeFactory.GetMutationColor(mutId)
-		else SlimeFactory.GetRarityColor(def.Rarity)
-
-	mutationLabel.Text = if mutId ~= "NORMAL" then mutId else string.upper(def.Rarity)
-	applyTone(mutationLabel, UiKit.TriFromColor(mutColor, 0.6, 0.3))
-	revealedNameLabel.Text = shortWord
-	applyTone(revealedNameLabel, UiKit.TriFromColor(SlimeFactory.ToColor3(def.Color), 0.6, 0.3))
-	local gemsEarned = tonumber(payload.GemsEarned) or 0
-	revealedIncomeLabel.Text = `${GameConfig.FormatNumber(payload.CaughtIncomePerSec or def.IncomePerSec)}/s`
-	gemsLabel.Text = `+{gemsEarned}`
-	gemsRow.Visible = gemsEarned > 0
-	newBadge.Visible = (payload.IsNewDiscovery == true)
-	finalInfoFrame.Visible = true
-
-	-- Wait for "tap to continue" (or 3.0s timeout)
-	local done = false
-	local doneConn = revealTapSignal.Event:Connect(function()
-		done = true
+		TweenService:Create(fadeOverlay, TweenInfo.new(0.22), { BackgroundTransparency = 0 }):Play()
+		task.wait(0.24)
 	end)
-	local elapsed = 0
-	while not done and elapsed < 3.0 do
-		elapsed += task.wait(0.04)
+
+	if not ok then
+		warn("[ThrowController] reveal cutscene error:", err)
 	end
-	doneConn:Disconnect()
 
-	TweenService:Create(fadeOverlay, TweenInfo.new(0.22), { BackgroundTransparency = 0 }):Play()
-	task.wait(0.24)
-
+	-- Guaranteed teardown so fadeOverlay never sticks as a black screen
 	revealRoot.Visible = false
-	slimeModel:Destroy()
-	baitModel:Destroy()
+	if slimeModel then
+		slimeModel:Destroy()
+	end
+	if baitModel.Parent then
+		baitModel:Destroy()
+	end
 
-	if cam then
+	if cam and (localPlayer:GetAttribute("InTraining") :: boolean?) ~= true then
 		cam.CameraType = Enum.CameraType.Custom
 	end
 
@@ -994,6 +1094,21 @@ throwBroadcast.OnClientEvent:Connect(function(payload: any)
 	end
 
 	local isLocal = (payload.PlayerUserId == localPlayer.UserId)
+	if isLocal then
+		-- Disarm the pre-flight server-drop watchdog once ThrowBroadcast arrives
+		activeThrowToken += 1
+		if type(payload.NextAutoMeterRatio) == "number" then
+			nextAutoMeterRatio = math.clamp(payload.NextAutoMeterRatio, 0, 1)
+		end
+		if payload.IsAuto == true then
+			local isPerf = payload.IsPerfect == true
+			local qLabel = if type(payload.QualityLabel) == "string"
+				then payload.QualityLabel
+				elseif isPerf then "PERFECT!"
+				else "GREAT!"
+			showThrowQualityCallout(qLabel, tonumber(payload.MeterLuck) or 1.48, payload.QualityColor, isPerf)
+		end
+	end
 
 	local sim = ThrowPhysics.Simulate({
 		Origin = payload.Origin,
@@ -1006,18 +1121,6 @@ throwBroadcast.OnClientEvent:Connect(function(payload: any)
 
 	local baitModel = SlimeFactory.CreateJellyBaitModel()
 	baitModel.Parent = workspace
-
-	local groundRing = Instance.new("Part")
-	groundRing.Name = "BaitGroundRing"
-	groundRing.Shape = Enum.PartType.Cylinder
-	groundRing.Size = Vector3.new(0.2, 11, 11)
-	groundRing.Material = Enum.Material.Neon
-	groundRing.Color = Color3.fromRGB(245, 255, 240)
-	groundRing.Transparency = 0.45
-	groundRing.Anchored = true
-	groundRing.CanCollide = false
-	groundRing.CastShadow = false
-	groundRing.Parent = workspace
 
 	-- Live luck ticker: replays the server's GameConfig.ComputeFlightLuck as the bait flies, so the
 	-- top-centre "1.XXx LUCK" climbs with distance and ends exactly on the server's LuckMultiplier.
@@ -1050,9 +1153,6 @@ throwBroadcast.OnClientEvent:Connect(function(payload: any)
 			local pos = Vector3.new(sample.Position.X, sample.Position.Y, sample.Position.Z)
 			local spinCf = CFrame.new(pos) * CFrame.Angles(elapsed * 9, 0, elapsed * 4.5)
 			SlimeFactory.PositionBait(baitModel, spinCf)
-
-			local floorY = ThrowPhysics.GetFloorYAtZ(math.max(0, pos.Z))
-			groundRing.CFrame = CFrame.new(pos.X, floorY + 0.15, pos.Z) * CFrame.Angles(0, 0, math.rad(90))
 
 			if isLocal then
 				maxDistance = math.max(maxDistance, math.clamp(pos.Z, 0, GameConfig.Hub.LaneMaxZ))
@@ -1095,7 +1195,6 @@ throwBroadcast.OnClientEvent:Connect(function(payload: any)
 			if conn then
 				conn:Disconnect()
 			end
-			groundRing:Destroy()
 			if isLocal then
 				luckValueLabel.Text = string.format("%.2fX", finalLuck) -- land exactly on the server value
 			end
@@ -1116,34 +1215,57 @@ end)
 
 RunService.RenderStepped:Connect(function(dt: number)
 	local near = checkNearThrowLine()
+	local modalOpen = (localPlayer:GetAttribute("ModalOpen") :: boolean?) == true
 	isAtThrowLine = near
 	localPlayer:SetAttribute("NearThrowLine", near)
 
-	if near and not isThrowInFlight and not inRevealCutscene then
+	if near and not modalOpen and not isThrowInFlight and not inRevealCutscene then
 		CharacterAnimator.StartAimPose(localPlayer.Character)
+		autoThrowButton.Visible = ownsAutoThrow
 		meterRoot.Visible = true
 
-		meterClock += dt
-		currentMeterRatio = 0.5 - 0.5 * math.cos(meterClock * 4.4)
-		local segDef = GameConfig.EvaluateMeterRatio(currentMeterRatio)
-
-		local yScale = 0.94 - currentMeterRatio * 0.88
-		sliderBar.Position = UDim2.fromScale(0.5, yScale)
-		sliderBonusLabel.Text = `+{segDef.BonusPower}`
-		if segDef.Index ~= lastBandIndex then
-			lastBandIndex = segDef.Index
-			applyTone(sliderBonusLabel, UiKit.TriFromColor(SlimeFactory.ToColor3(segDef.Color)))
-		end
-
-		autoThrowButton.Visible = ownsAutoThrow
 		if ownsAutoThrow and autoThrowEnabled then
+			-- Keep the 9-segment vertical meter VISIBLE while AUTO is active and smoothly lock the slider
+			-- onto the exact server-peeked Green (Band 9 PERFECT!) or Light-Green (Band 8 GREAT!) segment!
+			tapPromptLabel.Text = "AUTO-THROWING..."
 			autoIdleClock += dt
-			if autoIdleClock >= GameConfig.AutoThrow.IdleDelaySeconds then
+			local delaySec = GameConfig.AutoThrow.IdleDelaySeconds
+			local glideSec = math.max(0.05, delaySec * 0.72)
+			local targetSeg = GameConfig.EvaluateMeterRatio(nextAutoMeterRatio)
+			local targetVisualRatio = (targetSeg.Index - 0.5) / segCount
+			local u = math.clamp(autoIdleClock / glideSec, 0, 1)
+			local eased = 1 - ((1 - u) ^ 3)
+			currentMeterRatio = 0.30 + (targetVisualRatio - 0.30) * eased
+
+			local segDef = GameConfig.EvaluateMeterRatio(currentMeterRatio)
+			local yScale = math.clamp(1 - currentMeterRatio, 0.04, 0.96)
+			sliderBar.Position = UDim2.fromScale(0.5, yScale)
+			sliderBonusLabel.Text = string.format("%s %.2fx", segDef.QualityLabel, segDef.LuckMultiplier)
+			if segDef.Index ~= lastBandIndex then
+				lastBandIndex = segDef.Index
+				applyTone(sliderBonusLabel, UiKit.TriFromColor(SlimeFactory.ToColor3(segDef.Color)))
+			end
+
+			if autoIdleClock >= delaySec then
 				autoIdleClock = 0
 				triggerThrowFromMeter(true)
 			end
 		else
+			tapPromptLabel.Text = defaultTapPromptText
 			autoIdleClock = 0
+
+			meterClock += dt
+			currentMeterRatio = 0.5 - 0.5 * math.cos(meterClock * 4.4)
+			local segDef = GameConfig.EvaluateMeterRatio(currentMeterRatio)
+
+			-- Exact 1:1 alignment inside segmentsContainer (top = 0.0 -> Band 9 Green, bottom = 1.0 -> Band 1 Red)
+			local yScale = math.clamp(1 - currentMeterRatio, 0.04, 0.96)
+			sliderBar.Position = UDim2.fromScale(0.5, yScale)
+			sliderBonusLabel.Text = string.format("%s %.2fx", segDef.QualityLabel, segDef.LuckMultiplier)
+			if segDef.Index ~= lastBandIndex then
+				lastBandIndex = segDef.Index
+				applyTone(sliderBonusLabel, UiKit.TriFromColor(SlimeFactory.ToColor3(segDef.Color)))
+			end
 		end
 	else
 		meterRoot.Visible = false

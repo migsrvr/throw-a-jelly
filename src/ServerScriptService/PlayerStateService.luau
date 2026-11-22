@@ -25,6 +25,16 @@ local offlineOffers: { [Player]: { Cash: number, AwaySeconds: number } } = {}
 -- Unlock pop-ups already announced this session
 local unlockSeen: { [Player]: ProgressionLogic.UnlockSeen } = {}
 local listeners: { (Player, ProgressionLogic.PlayerProfile) -> () } = {}
+local passChecker: ((Player, ProgressionLogic.PlayerProfile) -> ())? = nil
+local autoMeterPeeker: ((Player) -> number)? = nil
+
+function PlayerStateService.SetPassChecker(fn: (Player, ProgressionLogic.PlayerProfile) -> ())
+	passChecker = fn
+end
+
+function PlayerStateService.SetAutoMeterPeeker(fn: (Player) -> number)
+	autoMeterPeeker = fn
+end
 
 local function ensureLeaderstats(player: Player)
 	local ls = player:FindFirstChild("leaderstats") :: Folder?
@@ -135,7 +145,10 @@ function PlayerStateService.Sync(player: Player)
 		DailyQuests = profile.DailyQuests,
 		OwnedPasses = profile.OwnedPasses,
 		ProgressSaved = DataService.CanSave(player), -- false: this session won't be saved (load failed / Studio)
-		MaxSlimes = profile.MaxSlimes,
+		MaxSlimes = ProgressionLogic.GetEffectiveMaxSlimes(profile),
+		NextAutoMeterRatio = if autoMeterPeeker and ProgressionLogic.OwnsAutoThrow(profile)
+			then autoMeterPeeker(player)
+			else nil,
 		BestDistance = profile.BestDistance,
 		EquippedSlimeId = profile.EquippedSlimeId,
 		OwnedSlimes = profile.OwnedSlimes,
@@ -192,18 +205,25 @@ function PlayerStateService.Sync(player: Player)
 end
 
 -- Pays the Welcome Back offer once. multiplier 2 comes from the "2X" developer product (MonetizationService).
-function PlayerStateService.ClaimOffline(player: Player, multiplier: number): boolean
+function PlayerStateService.ClaimOffline(player: Player, multiplier: number): (boolean, number, number)
 	local profile = profiles[player]
 	local offer = offlineOffers[player]
 	if not profile or not offer then
-		return false
+		return false, 0, 0
 	end
 	offlineOffers[player] = nil
 	local amount = offer.Cash * multiplier
 	profile.Cash += amount
+	QuestLogic.RecordEvent(profile, "EarnCash", amount)
 	PlayerStateService.Toast(player, `Welcome back! +${GameConfig.FormatNumber(amount)}`, "cash")
 	PlayerStateService.Sync(player)
-	return true
+	return true, amount, offer.AwaySeconds
+end
+
+function PlayerStateService.RestoreOfflineOffer(player: Player, cash: number, awaySeconds: number)
+	if cash > 0 then
+		offlineOffers[player] = { Cash = cash, AwaySeconds = awaySeconds }
+	end
 end
 
 function PlayerStateService.Toast(player: Player, message: string, kind: string?)
@@ -246,6 +266,13 @@ function PlayerStateService.Init()
 		end
 		profiles[player] = profile
 		unlockSeen[player] = { BaitTierOffered = profile.BaitTier, ZoneSeen = profile.HighestZoneReached }
+		-- Populate Game Pass ownership before computing offline earnings or firing the initial sync
+		if passChecker then
+			passChecker(player, profile)
+			if not player.Parent then
+				return
+			end
+		end
 		-- Welcome Back: offline income since the last save
 		if loaded and profile.LastSeen > 0 then
 			local away = os.time() - profile.LastSeen
@@ -314,8 +341,9 @@ function PlayerStateService.Init()
 			return
 		end
 		refreshDailyAndQuests(player)
+		local gemMult = ProgressionLogic.GetGemMultiplier(profile)
 		if payload.Kind == "Line" then
-			local ok, msg, reward = QuestLogic.ClaimLineQuest(profile)
+			local ok, msg, reward = QuestLogic.ClaimLineQuest(profile, gemMult)
 			local kind = if not ok then "warn" elseif reward and reward.Gems then "gems" else "success"
 			PlayerStateService.Toast(player, msg, kind)
 			if ok then
@@ -326,7 +354,7 @@ function PlayerStateService.Init()
 			if not idx then
 				return
 			end
-			local ok, msg, reward = QuestLogic.ClaimDailyQuest(profile, idx)
+			local ok, msg, reward = QuestLogic.ClaimDailyQuest(profile, idx, gemMult)
 			local kind = if not ok then "warn" elseif reward and reward.Gems then "gems" else "success"
 			PlayerStateService.Toast(player, msg, kind)
 			if ok then
@@ -398,6 +426,26 @@ function PlayerStateService.Init()
 		if slotIdx then
 			local ok, msg = ProgressionLogic.PickupSlimeFromSlot(profile, slotIdx)
 			PlayerStateService.Toast(player, msg, if ok then "info" else "warn")
+			if ok then
+				PlayerStateService.Sync(player)
+			end
+		end
+	end)
+
+	Remotes.GetEvent("RequestSellSlime").OnServerEvent:Connect(function(player: Player, payload: any)
+		local profile = profiles[player]
+		if not profile or type(payload) ~= "table" then
+			return
+		end
+		if payload.Mode == "All" then
+			local ok, msg = ProgressionLogic.SellAllUnplacedSlimes(profile)
+			PlayerStateService.Toast(player, msg, if ok then "cash" else "warn")
+			if ok then
+				PlayerStateService.Sync(player)
+			end
+		elseif type(payload.SlimeUid) == "string" then
+			local ok, msg = ProgressionLogic.SellSlime(profile, payload.SlimeUid)
+			PlayerStateService.Toast(player, msg, if ok then "cash" else "warn")
 			if ok then
 				PlayerStateService.Sync(player)
 			end

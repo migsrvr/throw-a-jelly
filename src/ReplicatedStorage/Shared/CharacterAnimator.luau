@@ -19,7 +19,7 @@ local GameConfig = require(script.Parent:WaitForChild("GameConfig"))
 local PullUpMotion = require(script.Parent:WaitForChild("PullUpMotion"))
 
 -- Temporary diagnostics for the "pitch does nothing" bug. Set to false once confirmed fixed.
-local DEBUG = true
+local DEBUG = false
 local VERSION = "pitch-v3"
 local PITCH_RENDER_STEP = "CharacterAnimatorPitchPose"
 
@@ -42,6 +42,7 @@ local activeThrowCleanup: (() -> ())? = nil
 
 local activeCarryModel: Model? = nil
 local activeCarryConn: RBXScriptConnection? = nil
+local activeCarryRig: RigMotors? = nil
 
 -- Cache original Motor6D.C0 per Motor6D instance so we never drift or lose the avatar's proportions
 local origC0Cache: { [Motor6D]: CFrame } = setmetatable({}, { __mode = "k" }) :: any
@@ -306,6 +307,8 @@ function CharacterAnimator.StartAimPose(character: Model?)
 	if not character or isThrowing or isPullingUp then
 		return
 	end
+	-- Always put away any carried hotbar slime when entering the throw-line aim stance
+	CharacterAnimator.StopCarrySlime()
 	if activeAimBait and activeAimBait.Parent then
 		return
 	end
@@ -697,6 +700,7 @@ function CharacterAnimator.StartCarrySlime(character: Model?, slimeId: string, m
 	activeCarryModel = mdl
 
 	local rig = getRigMotors(character)
+	activeCarryRig = rig
 
 	activeCarryConn = RunService.Stepped:Connect(function()
 		-- Never fight the pitch for the shoulder joints
@@ -728,6 +732,10 @@ function CharacterAnimator.StopCarrySlime()
 		activeCarryModel:Destroy()
 		activeCarryModel = nil
 	end
+	if activeCarryRig and not isThrowing and not isPullingUp then
+		resetRigMotors(activeCarryRig)
+	end
+	activeCarryRig = nil
 end
 
 -- ============================================================================
