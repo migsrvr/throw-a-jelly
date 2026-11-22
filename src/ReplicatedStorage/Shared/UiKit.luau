@@ -244,10 +244,15 @@ function UiKit.CreateSlimeViewport(
 
 	local def = GameConfig.SlimesById[slimeId] or GameConfig.Slimes[1]
 	local model = SlimeFactory.CreateSlimeModel(def.Id, false, mutationId)
-	-- Face the camera (+Z forward face looks toward camera at -Z)
-	SlimeFactory.PositionSlime(model, CFrame.new(0, 0, 0) * CFrame.Angles(0, math.rad(160), 0), 0)
+	-- Face the camera, which sits at -Z. Authored slime models face -Z (3/4 turn toward the camera's
+	-- right); the old procedural ball had its eyes on +Z, so it needs the 160 degree turn.
+	local isCustom = model:GetAttribute("CustomModel") == true
+	local yaw = if isCustom then math.rad(-24) else math.rad(160)
+	SlimeFactory.PositionSlime(model, CFrame.new(0, 0, 0) * CFrame.Angles(0, yaw, 0), 0)
 
-	if isSilhouette then
+	if isSilhouette and isCustom then
+		SlimeFactory.SetSilhouetteMode(model, true)
+	elseif isSilhouette then
 		local outer = model:FindFirstChild("OuterJelly") :: BasePart?
 		local core = model:FindFirstChild("InnerCore") :: BasePart?
 		local lEye = model:FindFirstChild("LeftEye") :: BasePart?
@@ -272,7 +277,14 @@ function UiKit.CreateSlimeViewport(
 	local cam = Instance.new("Camera")
 	local baseRadius = (model:GetAttribute("BaseSize") :: number?) or 2.4
 	local dist = baseRadius * 1.55
-	cam.CFrame = CFrame.lookAt(Vector3.new(dist * 0.45, dist * 0.35, -dist), Vector3.new(0, -0.05, 0))
+	local lookAtPoint = Vector3.new(0, -0.05, 0)
+	if isCustom then
+		-- Authored models have accessories (crowns, wings...) so frame the whole bounding box
+		local bboxCf, bboxSize = model:GetBoundingBox()
+		lookAtPoint = bboxCf.Position
+		dist = math.max(bboxSize.X, bboxSize.Y, bboxSize.Z) * 1.2
+	end
+	cam.CFrame = CFrame.lookAt(lookAtPoint + Vector3.new(dist * 0.45, dist * 0.35, -dist), lookAtPoint)
 	cam.FieldOfView = 42
 	cam.Parent = vp
 	vp.CurrentCamera = cam

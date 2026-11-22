@@ -694,9 +694,11 @@ function ProgressionLogic.RollSlimeForZone(zoneIndex: number, unitRandom: number
 
 	local weights = {}
 	local totalWeight = 0
+	-- Calibrated exponent so 2x -> 10x Luck visibly boosts rarest slimes across all zones. The rarest slime
+	-- always gets luck^1.1 (the 3-slime calibration: 0.55 per step); with more slimes per zone the step shrinks.
+	local luckStep = 1.1 / math.max(1, #pool - 1)
 	for i, slime in pool do
-		-- Calibrated exponent so 2x -> 10x Luck visibly boosts rarest slimes across all zones
-		local w = if i == 1 then slime.DropWeight else slime.DropWeight * (luck ^ (0.55 * (i - 1)))
+		local w = if i == 1 then slime.DropWeight else slime.DropWeight * (luck ^ (luckStep * (i - 1)))
 		weights[i] = w
 		totalWeight += w
 	end

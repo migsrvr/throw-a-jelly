@@ -172,11 +172,14 @@ function PlotService.RefreshPlotVisuals(plot: Model, profile: ProgressionLogic.P
 					local def = GameConfig.SlimesById[inst.SlimeId] or GameConfig.Slimes[1]
 					local radius = (2.4 * def.Scale) * 0.44
 					local halfHeight = getWorldHalfHeight(slotPart)
+					-- Plots are entered from the +Z side (spawn pad), so turn the slime's face (-Z) toward +Z
 					local baseCf = CFrame.new(slotPart.Position + Vector3.new(0, halfHeight + radius, 0))
+						* CFrame.Angles(0, math.pi, 0)
 					slimeModel:SetAttribute("SlotBaseY", baseCf.Position.Y)
 					slimeModel:SetAttribute("SlotPhase", slotIdx * 0.75)
 					SlimeFactory.PositionSlime(slimeModel, baseCf, 0)
 					slimeModel.Parent = plot
+					SlimeFactory.MakeRigid(slimeModel) -- weld to the root: one replicated part per slime while bobbing
 					currentModels[slotIdx] = slimeModel
 				end
 			end
@@ -793,6 +796,7 @@ local function wireSellShop()
 		local mascot = SlimeFactory.CreateSlimeModel("meadow_honey", false, "GOLDEN")
 		SlimeFactory.PositionSlime(mascot, CFrame.lookAt(Vector3.new(cx, 36.2, -13.5), Vector3.new(cx, 36.2, -25)), 0)
 		mascot.Parent = model
+		SlimeFactory.MakeRigid(mascot)
 
 		-- Invisible interaction trigger aligned next to JellyShop.ShopTrigger
 		local trigger = makePart("SellTrigger", Vector3.new(14.0, 8.0, 8.0), CFrame.new(cx, 34.0, -24.5), creamWhite)
@@ -1005,7 +1009,7 @@ function PlotService.Init()
 					local phase = (slimeModel:GetAttribute("SlotPhase") :: number?) or 0
 					local wave = math.sin(accum * 3.4 + phase)
 					local pos = Vector3.new(primary.Position.X, baseY + math.max(0, wave) * 0.45, primary.Position.Z)
-					SlimeFactory.PositionSlime(slimeModel, CFrame.new(pos), -wave * 0.14)
+					SlimeFactory.PositionSlime(slimeModel, CFrame.new(pos) * CFrame.Angles(0, math.pi, 0), -wave * 0.14)
 				end
 			end
 		end

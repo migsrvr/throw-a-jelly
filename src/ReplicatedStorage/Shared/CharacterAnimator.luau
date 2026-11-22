@@ -709,7 +709,8 @@ function CharacterAnimator.StartCarrySlime(character: Model?, slimeId: string, m
 		end
 		local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
 		if root then
-			local carryCf = root.CFrame * CFrame.new(0, 0.3, -2.1)
+			-- Turned 180 degrees so the slime's face (-Z) looks back at the carrier
+			local carryCf = root.CFrame * CFrame.new(0, 0.3, -2.1) * CFrame.Angles(0, math.pi, 0)
 			SlimeFactory.PositionSlime(activeCarryModel, carryCf, 0.08 * math.sin(os.clock() * 6))
 		end
 

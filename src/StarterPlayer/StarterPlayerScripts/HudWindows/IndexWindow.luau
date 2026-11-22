@@ -1,8 +1,8 @@
 --!strict
 --[[
 	IndexWindow.luau
-	Slime Index modal (docs/docs/UI-MOCKUP-SPEC.md 3d, 5b): zone rows with zone card, 3 slime cards
-	(silhouette + "???" until discovered), zone progress bar, footer "Unlocked X/15", and a right column with
+	Slime Index modal (docs/docs/UI-MOCKUP-SPEC.md 3d, 5b): zone rows with zone card, 6 slime cards
+	(2 rows of 3; silhouette + "???" until discovered), zone progress bar, footer "Unlocked X/total", and a right column with
 	the selected slime's detail card and the zone trail card (LOCKED / EQUIP / EQUIPPED).
 	Cards are built once; Refresh only re-tints what changed so viewports do not flicker on state syncs.
 ]]
@@ -30,6 +30,8 @@ export type IndexWindowHandle = {
 
 local ZONE_ICON_KEYS = { "zone_meadow", "zone_crystal", "zone_lava", "zone_frost", "zone_candy" }
 local CARD_W, CARD_H = 148, 190
+local COLS = 3 -- slime cards per line; a zone's 6 slimes wrap onto two lines
+local ROW_H = CARD_H * 2 + 6 + 10 + 30 + 4 -- two card lines + progress bar
 
 local function makeLabel(parent: Instance, size: number, text: string, align: Enum.TextXAlignment?): TextLabel
 	local l = Instance.new("TextLabel")
@@ -215,12 +217,12 @@ function IndexWindow.Build(parent: Instance, ctx: IndexWindowContext): IndexWind
 		local row = Instance.new("Frame")
 		row.Name = "Zone_" .. zone.Index
 		row.LayoutOrder = zone.Index
-		row.Size = UDim2.new(1, 0, 0, 248)
+		row.Size = UDim2.new(1, 0, 0, ROW_H)
 		row.BackgroundTransparency = 1
 		row.Parent = scroll
 
 		local zCard = Instance.new("Frame")
-		zCard.Size = UDim2.fromOffset(132, 248)
+		zCard.Size = UDim2.fromOffset(132, ROW_H)
 		zCard.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 		zCard.Parent = row
 		UiKit.AddCorner(zCard, 18)
@@ -228,16 +230,28 @@ function IndexWindow.Build(parent: Instance, ctx: IndexWindowContext): IndexWind
 		local zStroke = UiKit.AddFrameOutline(zCard, 4)
 		UiKit.AddBevel(zCard, 18)
 		UiKit.AddGloss(zCard, 18)
-		local zIcon = UiKit.CreateIcon(zCard, ZONE_ICON_KEYS[zone.Index] or "star", 78)
+		local zIcon: GuiObject
+		if ZONE_ICON_KEYS[zone.Index] then
+			zIcon = UiKit.CreateIcon(zCard, ZONE_ICON_KEYS[zone.Index], 78)
+		else
+			-- zones without an icon asset yet (Desert Dunes, Acid Swamp) show their emoji
+			local emoji = Instance.new("TextLabel")
+			emoji.Size = UDim2.fromOffset(78, 78)
+			emoji.BackgroundTransparency = 1
+			emoji.Text = zone.Emoji
+			emoji.TextSize = 60
+			emoji.Parent = zCard
+			zIcon = emoji
+		end
 		zIcon.AnchorPoint = Vector2.new(0.5, 0)
-		zIcon.Position = UDim2.new(0.5, 0, 0, 52)
+		zIcon.Position = UDim2.new(0.5, 0, 0, ROW_H * 0.5 - 60)
 		zIcon.ZIndex = 3
 		local zName = makeLabel(zCard, 22, zone.Name)
 		zName.Position = UDim2.fromOffset(4, 14)
 		zName.Size = UDim2.new(1, -8, 0, 28)
 		zName.ZIndex = 3
 		local zPct = makeLabel(zCard, 26, "0%")
-		zPct.Position = UDim2.fromOffset(4, 150)
+		zPct.Position = UDim2.fromOffset(4, ROW_H * 0.5 + 40)
 		zPct.Size = UDim2.new(1, -8, 0, 34)
 		zPct.ZIndex = 3
 
@@ -246,7 +260,7 @@ function IndexWindow.Build(parent: Instance, ctx: IndexWindowContext): IndexWind
 			btn.Name = "Slime_" .. sDef.Id
 			btn.AutoButtonColor = false
 			btn.Text = ""
-			btn.Position = UDim2.fromOffset(140 + (idx - 1) * (CARD_W + 6), 0)
+			btn.Position = UDim2.fromOffset(140 + ((idx - 1) % COLS) * (CARD_W + 6), ((idx - 1) // COLS) * (CARD_H + 6))
 			btn.Size = UDim2.fromOffset(CARD_W, CARD_H)
 			btn.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 			btn.Parent = row
@@ -280,8 +294,8 @@ function IndexWindow.Build(parent: Instance, ctx: IndexWindowContext): IndexWind
 			end)
 		end
 
-		local bar = UiKit.CreateProgressBar(row, UDim2.fromOffset(CARD_W * 3 + 12, 30), UiKit.Gradients.Green)
-		bar.Frame.Position = UDim2.fromOffset(140, 206)
+		local bar = UiKit.CreateProgressBar(row, UDim2.fromOffset(CARD_W * COLS + 6 * (COLS - 1), 30), UiKit.Gradients.Green)
+		bar.Frame.Position = UDim2.fromOffset(140, CARD_H * 2 + 16)
 
 		table.insert(zoneRows, { Zone = zone, Stroke = zStroke, Pct = zPct, Bar = bar })
 	end
