@@ -3,8 +3,13 @@
 	Pulls scripts and an AI-readable DataModel hierarchy snapshot from a saved
 	Roblox Studio place file (.rbxl or .rbxlx) into a safe Rojo workspace.
 
+	WARNING: this DELETES and rebuilds src/ and rewrites default.project.json from the place file.
+	It does NOT extract meshes or models (e.g. ReplicatedStorage.SlimeModels). An old place file can
+	bring back stale scripts, so it refuses to run unless you pass --force.
+	For slime models, use scripts/check-slime-models instead (read-only).
+
 	Usage:
-		lune run scripts/pull-from-place [path/to/place.rbxl]
+		lune run scripts/pull-from-place [path/to/place.rbxl] --force
 ]]
 
 local fs = require("@lune/fs")
@@ -47,7 +52,13 @@ local GEOMETRY_CLASSES: { [string]: boolean } = {
 }
 
 local function findPlaceFile(): string?
-	local explicitArg = process.args[1]
+	local explicitArg = nil
+	for _, arg in process.args do
+		if string.sub(arg, 1, 2) ~= "--" then
+			explicitArg = arg
+			break
+		end
+	end
 	if explicitArg and explicitArg ~= "" then
 		if fs.isFile(explicitArg) then
 			return explicitArg
@@ -295,6 +306,14 @@ local function buildHierarchyLines(inst: any, indent: string, lines: { string },
 end
 
 local function main()
+	local force = table.find(process.args, "--force") ~= nil
+	if not force then
+		print("Refusing to run: this rewrites src/ and default.project.json from the place file.")
+		print("Your repo's scripts would be replaced by whatever the place file contains.")
+		print("Run again with --force only if you really mean it (see the header of this script).")
+		process.exit(1)
+	end
+
 	local placePath = findPlaceFile()
 	if not placePath then
 		print("No .rbxl or .rbxlx place file found in workspace root.")

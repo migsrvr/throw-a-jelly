@@ -9,6 +9,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared:WaitForChild("GameConfig"))
@@ -156,6 +157,32 @@ function ThrowService.Init()
 		local zoneDef = GameConfig.Zones[simResult.LandedZoneIndex] or GameConfig.Zones[1]
 		local blockedZone = if simResult.BlockedByZoneIndex then GameConfig.Zones[simResult.BlockedByZoneIndex] else nil
 
+		-- STUDIO ONLY: ReplicatedStorage:SetAttribute("DebugForceSlimeId", "crystal_bat") (optionally also
+		-- "DebugForceMutation") changes which slime the catch cutscene SHOWS. Visual only: the real reward
+		-- above is unchanged. Live servers ignore it.
+		-- "DebugForceNew" (bool) picks the new-discovery silhouette (true) or the already-known full-colour
+		-- look (false); without it a forced slime counts as new if this profile never discovered it.
+		local shownSlimeDef = reward.CaughtSlimeDef
+		local shownMutation = reward.Mutation
+		local shownIsNew = reward.IsNewDiscovery
+		if RunService:IsStudio() then
+			local forcedId = ReplicatedStorage:GetAttribute("DebugForceSlimeId")
+			if type(forcedId) == "string" and GameConfig.SlimesById[forcedId] then
+				shownSlimeDef = GameConfig.SlimesById[forcedId]
+				if forcedId ~= reward.CaughtSlimeId then
+					shownIsNew = profile.DiscoveredSlimes[forcedId] ~= true
+				end
+			end
+			local forcedNew = ReplicatedStorage:GetAttribute("DebugForceNew")
+			if type(forcedNew) == "boolean" then
+				shownIsNew = forcedNew
+			end
+			local forcedMut = ReplicatedStorage:GetAttribute("DebugForceMutation")
+			if type(forcedMut) == "string" and GameConfig.MutationsById[forcedMut] then
+				shownMutation = forcedMut
+			end
+		end
+
 		throwBroadcast:FireAllClients({
 			PlayerUserId = player.UserId,
 			PlayerName = player.DisplayName,
@@ -189,15 +216,15 @@ function ThrowService.Init()
 			BlockedByZoneName = if blockedZone then blockedZone.Name else nil,
 			BlockedRequiredPower = if blockedZone then blockedZone.RequiredThrowPower else nil,
 			CashEarned = reward.CashEarned,
-			CaughtSlimeId = reward.CaughtSlimeId,
-			CaughtSlimeName = reward.CaughtSlimeDef.Name,
-			CaughtShortWord = reward.CaughtSlimeDef.ShortWord,
-			CaughtSlimeRarity = reward.CaughtSlimeDef.Rarity,
-			CaughtMutation = reward.Mutation,
+			CaughtSlimeId = shownSlimeDef.Id,
+			CaughtSlimeName = shownSlimeDef.Name,
+			CaughtShortWord = shownSlimeDef.ShortWord,
+			CaughtSlimeRarity = shownSlimeDef.Rarity,
+			CaughtMutation = shownMutation,
 			CaughtIncomePerSec = reward.CaughtInstance.IncomePerSec,
 			OddsOneInX = reward.OddsOneInX,
 			IsSuperLucky = reward.IsSuperLucky,
-			IsNewDiscovery = reward.IsNewDiscovery,
+			IsNewDiscovery = shownIsNew,
 			AutoPlaced = reward.AutoPlaced,
 			IsNewBest = reward.IsNewBestDistance,
 			GemsEarned = reward.Gems.Total,

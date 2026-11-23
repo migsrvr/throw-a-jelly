@@ -43,4 +43,14 @@ which lets them throw farther into richer zones.
 - `src/ReplicatedStorage/Shared/UiKit.luau`: the small set of reusable UI helpers.
 - Tests: `lune run tests/run-tests`. Refresh the generated data tables: `lune run scripts/gen-docs-data`.
 
+## Getting art and models out of Studio
+
+Scripts sync from the repo through Rojo, but **models and meshes do not** (they live only in the Studio place).
+- **To run the game:** nothing extra. Publish from Studio as usual. `$ignoreUnknownInstances` keeps the models.
+- **To back up and check the slime models (one export does both):** in Studio, right-click
+  `ReplicatedStorage.SlimeModels` > Save/Export Selection > save as `assets/SlimeModels.rbxm`. Commit it, then run
+  `lune run scripts/check-slime-models assets/SlimeModels.rbxm` (read-only). No `.rbxl` is needed.
+- **Alternative:** File > Save to File As > `scratch/place-copy.rbxl`, then run the checker on that file.
+- **Do not run `scripts/pull-from-place` to get models.** It replaces `src/` and only handles scripts. It needs `--force`.
+
 Recorded game clips used as visual reference are in `docs/context-clips/`.

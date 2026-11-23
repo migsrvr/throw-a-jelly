@@ -91,6 +91,8 @@ require("./Quests.spec")(harness)
 require("./ProfileSerializer.spec")(harness)
 require("./UiLayout.spec")(harness)
 require("./Offline.spec")(harness)
+require("./SlimeMotion.spec")(harness)
+require("./CatchFx.spec")(harness)
 
 print("\n----------------------------------------")
 print(`Suites: {totalSuites} | Tests: {totalTests} | Passed: {passedTests} | Failed: {failedTests}`)

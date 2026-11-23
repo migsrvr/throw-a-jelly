@@ -9,3 +9,6 @@
 # Generated Rojo sourcemap
 sourcemap.json
 context-clips
+
+# Scratch copies of places (e.g. Studio "Save to File As" for the slime check)
+/scratch/

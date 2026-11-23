@@ -25,6 +25,9 @@ local CharacterAnimator = require(Shared:WaitForChild("CharacterAnimator"))
 local GameConfig = require(Shared:WaitForChild("GameConfig"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local SlimeFactory = require(Shared:WaitForChild("SlimeFactory"))
+local SlimeMotion = require(Shared:WaitForChild("SlimeMotion"))
+local CatchFx = require(Shared:WaitForChild("CatchFx"))
+local CatchFxData = require(Shared:WaitForChild("CatchFxData"))
 local ThrowPhysics = require(Shared:WaitForChild("ThrowPhysics"))
 local UiKit = require(Shared:WaitForChild("UiKit"))
 local UiAssets = require(Shared:WaitForChild("UiAssets"))
@@ -353,9 +356,30 @@ revealRoot.Visible = false
 revealRoot.ZIndex = 12
 revealRoot.Parent = throwGui
 
+-- "CAUGHT!" stamp that pops in when the slime floats up into the showcase (under the "1 in X" counter)
+local CAUGHT_STAMP_Y = 100
+local CAUGHT_STAMP_H = 72
+local caughtStamp = Instance.new("TextLabel")
+caughtStamp.Name = "CaughtStamp"
+caughtStamp.AnchorPoint = Vector2.new(0.5, 0)
+caughtStamp.Position = UDim2.new(0.5, 0, 0, CAUGHT_STAMP_Y)
+caughtStamp.Size = UDim2.fromOffset(560, CAUGHT_STAMP_H)
+caughtStamp.BackgroundTransparency = 1
+caughtStamp.Font = Enum.Font.FredokaOne
+caughtStamp.TextSize = 64
+caughtStamp.TextColor3 = Color3.fromRGB(255, 255, 255)
+caughtStamp.Rotation = -4
+caughtStamp.Text = "CAUGHT!"
+caughtStamp.Visible = false
+caughtStamp.Parent = revealRoot
+UiKit.ApplyTri(caughtStamp, UiKit.Gradients.Luck)
+UiKit.AddTextStroke(caughtStamp)
+local caughtStampScale = Instance.new("UIScale")
+caughtStampScale.Parent = caughtStamp
+
 local superLuckyLabel = Instance.new("TextLabel")
 superLuckyLabel.AnchorPoint = Vector2.new(0.5, 0)
-superLuckyLabel.Position = UDim2.new(0.5, 0, 0, 100)
+superLuckyLabel.Position = UDim2.new(0.5, 0, 0, CAUGHT_STAMP_Y + CAUGHT_STAMP_H + 4)
 superLuckyLabel.Size = UDim2.fromOffset(560, 56)
 superLuckyLabel.BackgroundTransparency = 1
 superLuckyLabel.Font = Enum.Font.FredokaOne
@@ -393,6 +417,19 @@ finalInfoFrame.Size = UDim2.fromOffset(900, 270)
 finalInfoFrame.BackgroundTransparency = 1
 finalInfoFrame.Visible = false
 finalInfoFrame.Parent = revealRoot
+local finalInfoScale = Instance.new("UIScale") -- "name in" pop (UI-MOTION: 0 -> 1.15 -> 1)
+finalInfoScale.Parent = finalInfoFrame
+
+-- Full-screen white flash for Mythic catches (above the reveal content)
+local flashFrame = Instance.new("Frame")
+flashFrame.Name = "MythicFlash"
+flashFrame.Size = UDim2.fromScale(1, 1)
+flashFrame.BackgroundColor3 = Color3.new(1, 1, 1)
+flashFrame.BackgroundTransparency = 1
+flashFrame.BorderSizePixel = 0
+flashFrame.ZIndex = 19
+flashFrame.Active = false
+flashFrame.Parent = throwGui
 
 local mutationLabel = Instance.new("TextLabel")
 mutationLabel.AnchorPoint = Vector2.new(0.5, 0)
@@ -731,134 +768,53 @@ UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: 
 	end
 end)
 
--- Stage A: Longer (~1.65s) Slow Underground Peek & Full Pop-Out!
-local function animateLongerUndergroundEmergence(
-	slimeModel: Model,
-	emergeXZ: Vector3,
-	floorY: number,
-	lookTarget: Vector3
-)
-	local deepY = floorY - 2.7
-	local peekY = floorY + 0.15 -- Top half of head peeking out of the floor!
-	local surfaceY = floorY + 1.22
-	local popPeakY = floorY + 1.95
+-- Burst of zone-coloured dust (or sparkles for flyers) where the slime pops out of the ground
+local function spawnEmergeDust(groundPosition: Vector3, color: Color3, sparkle: boolean)
+	local anchor = Instance.new("Part")
+	anchor.Name = "EmergeDust"
+	anchor.Size = Vector3.new(2.5, 0.2, 2.5)
+	anchor.CFrame = CFrame.new(groundPosition + Vector3.new(0, 0.2, 0))
+	anchor.Transparency = 1
+	anchor.Anchored = true
+	anchor.CanCollide = false
+	anchor.CanQuery = false
+	anchor.CanTouch = false
+	anchor.CastShadow = false
+	anchor.Parent = workspace
 
-	-- Wave 1 ripple as head pushes up
-	spawnGroundRipple(Vector3.new(emergeXZ.X, floorY, emergeXZ.Z), Color3.fromRGB(115, 255, 145), 8.5, 0.75)
+	local emitter = Instance.new("ParticleEmitter")
+	emitter.Texture = if sparkle
+		then "rbxasset://textures/particles/sparkles_main.dds"
+		else "rbxasset://textures/particles/smoke_main.dds"
+	emitter.Color = ColorSequence.new(color:Lerp(Color3.new(1, 1, 1), 0.35), color)
+	emitter.LightEmission = if sparkle then 0.8 else 0.1
+	emitter.Size = if sparkle
+		then NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.6), NumberSequenceKeypoint.new(1, 0) })
+		else NumberSequence.new({ NumberSequenceKeypoint.new(0, 1.1), NumberSequenceKeypoint.new(1, 2.2) })
+	emitter.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.25), NumberSequenceKeypoint.new(1, 1) })
+	emitter.Lifetime = NumberRange.new(0.45, 0.85)
+	emitter.Speed = NumberRange.new(5, 9)
+	emitter.SpreadAngle = Vector2.new(70, 70)
+	emitter.EmissionDirection = Enum.NormalId.Top
+	emitter.Drag = 4
+	emitter.Acceleration = if sparkle then Vector3.new(0, 2, 0) else Vector3.new(0, -6, 0)
+	emitter.Rate = 0
+	emitter.Parent = anchor
+	emitter:Emit(18)
 
-	-- Part 1 (0.70s): Slowly push top of head out to peek above the floor
-	local t0 = os.clock()
-	while true do
-		local u = math.clamp((os.clock() - t0) / 0.70, 0, 1)
-		local ease = 1 - ((1 - u) ^ 2)
-		local curY = deepY + (peekY - deepY) * ease
-		local pos = Vector3.new(emergeXZ.X, curY, emergeXZ.Z)
-		local lookPos = Vector3.new(lookTarget.X, curY, lookTarget.Z)
-		SlimeFactory.PositionSlime(slimeModel, CFrame.lookAt(pos, lookPos), -0.18 * u)
-		if u >= 1 then
-			break
-		end
-		RunService.RenderStepped:Wait()
-	end
-
-	-- Part 2 (0.38s): Curious peek pause — looks slightly left & right toward the landed bait!
-	local t1 = os.clock()
-	while true do
-		local u = math.clamp((os.clock() - t1) / 0.38, 0, 1)
-		local yawGlance = math.rad(14 * math.sin(u * math.pi * 2))
-		local pos = Vector3.new(emergeXZ.X, peekY, emergeXZ.Z)
-		local lookPos = Vector3.new(lookTarget.X, peekY, lookTarget.Z)
-		SlimeFactory.PositionSlime(slimeModel, CFrame.lookAt(pos, lookPos) * CFrame.Angles(0, yawGlance, 0), 0.10)
-		if u >= 1 then
-			break
-		end
-		RunService.RenderStepped:Wait()
-	end
-
-	-- Wave 2 ripple as the full body squeezes out of the ground!
-	spawnGroundRipple(Vector3.new(emergeXZ.X, floorY, emergeXZ.Z), Color3.fromRGB(115, 255, 145), 11.0, 0.65)
-
-	-- Part 3 (0.62s): Squeeze & pop the rest of the jelly body out onto the surface
-	local t2 = os.clock()
-	while true do
-		local u = math.clamp((os.clock() - t2) / 0.62, 0, 1)
-		local curY: number
-		local squash: number
-		if u < 0.65 then
-			local a = u / 0.65
-			curY = peekY + (popPeakY - peekY) * (1 - ((1 - a) ^ 2))
-			squash = -0.34 * math.sin(a * math.pi)
-		else
-			local a = (u - 0.65) / 0.35
-			curY = popPeakY + (surfaceY - popPeakY) * a
-			squash = 0.25 * math.sin(a * math.pi)
-		end
-		local pos = Vector3.new(emergeXZ.X, curY, emergeXZ.Z)
-		local lookPos = Vector3.new(lookTarget.X, curY, lookTarget.Z)
-		SlimeFactory.PositionSlime(slimeModel, CFrame.lookAt(pos, lookPos), squash)
-		if u >= 1 then
-			break
-		end
-		RunService.RenderStepped:Wait()
-	end
+	task.delay(1.5, function()
+		anchor:Destroy()
+	end)
 end
 
--- Stage B: Slow, deliberate squash-hop toward the thrown bait with curious head tilt!
-local function animateSlowHopTowardBait(
-	slimeModel: Model,
-	startPos: Vector3,
-	endPos: Vector3,
-	baitPos: Vector3,
-	hopDuration: number,
-	stepIndex: number
-)
-	local startClock = os.clock()
-	local hopHeight = 0.85
-	local tiltDir = if stepIndex % 2 == 1 then 1 else -1
-
-	while true do
-		local elapsed = os.clock() - startClock
-		local u = math.clamp(elapsed / hopDuration, 0, 1)
-
-		local pos: Vector3
-		local squash: number
-		local headTiltRad = 0
-
-		if u < 0.24 then
-			local a = u / 0.24
-			pos = startPos
-			squash = 0.25 * a
-		elseif u < 0.78 then
-			local a = (u - 0.24) / 0.54
-			local horiz = startPos:Lerp(endPos, a)
-			local arcY = math.sin(a * math.pi) * hopHeight
-			pos = horiz + Vector3.new(0, arcY, 0)
-			squash = -0.20 * math.sin(a * math.pi)
-			headTiltRad = math.rad(9 * tiltDir * math.sin(a * math.pi))
-		else
-			local a = (u - 0.78) / 0.22
-			pos = endPos
-			squash = 0.22 * (1 - a)
-			headTiltRad = math.rad(11 * tiltDir * math.sin(a * math.pi))
-		end
-
-		local lookAtPos = Vector3.new(baitPos.X, pos.Y, baitPos.Z)
-		local cf = CFrame.lookAt(pos, lookAtPos) * CFrame.Angles(0, 0, headTiltRad)
-		SlimeFactory.PositionSlime(slimeModel, cf, squash)
-
-		if u >= 1 then
-			break
-		end
-		RunService.RenderStepped:Wait()
-	end
-
-	spawnGroundRipple(
-		Vector3.new(endPos.X, endPos.Y - 1.22, endPos.Z),
-		Color3.fromRGB(115, 255, 145),
-		5.0,
-		0.35
-	)
-end
+-- Catch cutscene walk: number of steps toward the bait, how far away the slime emerges, and step timing
+-- (emerge ~1.7s + REVEAL_STEPS x (STEP + HOLD) + eat ~0.55s = ~7.4s)
+local REVEAL_STEPS = 8
+local REVEAL_EMERGE_DIST = 15
+local REVEAL_STEP_TIME = 0.52
+local REVEAL_STEP_HOLD = 0.12
+local REVEAL_CAM_BIND = "SlimeRevealCam"
+local REVEAL_SCREEN_FRACTION = 0.26 -- how much of the screen height the slime fills
 
 -- Casts from lookTarget -> desiredPos so the reveal camera never clips inside a zone cliff or prop
 local function safeRevealCamCFrame(desiredPos: Vector3, lookTarget: Vector3, exclude: { Instance }): CFrame
@@ -877,6 +833,130 @@ local function safeRevealCamCFrame(desiredPos: Vector3, lookTarget: Vector3, exc
 	return CFrame.lookAt(desiredPos, lookTarget)
 end
 
+-- Camera that keeps the slime horizontally centred and sitting right above the reveal name title
+-- (finalInfoFrame), seen from the side (viewDir points from the slime toward the camera).
+local function frameSlimeAboveTitle(
+	cam: Camera,
+	target: Vector3,
+	slimeSize: number,
+	viewDir: Vector3,
+	exclude: { Instance },
+	fovDeg: number? -- the FOV the framing is meant for (defaults to the camera's current FOV)
+): (CFrame, number)
+	local vh = math.max(1, cam.ViewportSize.Y)
+	local tanHalf = math.tan(math.rad(fovDeg or cam.FieldOfView) * 0.5)
+	local dist = math.clamp(slimeSize * 1.1 / (2 * REVEAL_SCREEN_FRACTION * tanHalf), 6, 16)
+	local cf = safeRevealCamCFrame(target + viewDir * dist, target, exclude)
+
+	-- Where the title starts on screen (it is laid out even while hidden); fallback = its design position
+	local titleTop = finalInfoFrame.AbsolutePosition.Y
+	if titleTop <= 0 then
+		titleTop = vh - 294
+	end
+	local cy = math.clamp(titleTop - (REVEAL_SCREEN_FRACTION * 0.5) * vh - 16, 0.32 * vh, 0.62 * vh)
+	local ndcY = cy / vh * 2 - 1 -- > 0 = below the screen centre
+	-- Pitching the camera up by this angle moves the slime down the screen to cy
+	return cf * CFrame.Angles(math.atan(ndcY * tanHalf), 0, 0), cy
+end
+
+-- Rarity tiers for how loud the catch highlight is (UI-MOTION: rays Rare+, shake Epic+, flash Mythic)
+local RARITY_TIER: { [string]: number } = { Common = 1, Uncommon = 2, Rare = 3, Epic = 4, Legendary = 5, Mythic = 6 }
+
+-- Glow + rotating sunburst rays behind the showcased slime, a pulsing light on it and a sparkle burst.
+-- Everything is parented to the slime model, so it is cleaned up when the slime is destroyed.
+local function spawnCatchHighlight(model: Model, pos: Vector3, cam: Camera, color: Color3, tier: number)
+	local baseSize = (model:GetAttribute("BaseSize") :: number?) or 2.4
+
+	-- Anchor sits behind the slime (away from the camera) so the depth-tested billboard stays behind it
+	local away = pos - cam.CFrame.Position
+	away = if away.Magnitude > 0.01 then away.Unit else Vector3.new(0, 0, 1)
+	local anchor = Instance.new("Part")
+	anchor.Name = "CatchFx"
+	anchor.Size = Vector3.new(0.2, 0.2, 0.2)
+	anchor.Transparency = 1
+	anchor.Anchored = true
+	anchor.CanCollide = false
+	anchor.CanQuery = false
+	anchor.CanTouch = false
+	anchor.CastShadow = false
+	anchor.CFrame = CFrame.new(pos + away * (baseSize * 1.6))
+	anchor.Parent = model
+
+	local bb = Instance.new("BillboardGui")
+	bb.Name = "CatchRays"
+	bb.Size = UDim2.fromScale(baseSize * 4.5, baseSize * 4.5) -- scale = studs
+	bb.AlwaysOnTop = false
+	bb.LightInfluence = 0
+	bb.Adornee = anchor
+	bb.Parent = anchor
+
+	local function addImage(image: string, transparency: number, z: number): ImageLabel
+		local img = Instance.new("ImageLabel")
+		img.AnchorPoint = Vector2.new(0.5, 0.5)
+		img.Position = UDim2.fromScale(0.5, 0.5)
+		img.Size = UDim2.fromScale(1, 1)
+		img.BackgroundTransparency = 1
+		img.Image = image
+		img.ImageColor3 = color
+		img.ImageTransparency = 1
+		img.ZIndex = z
+		img.Parent = bb
+		TweenService:Create(img, TweenInfo.new(0.25), { ImageTransparency = transparency }):Play()
+		return img
+	end
+
+	local glow = addImage(UiAssets.Textures.glow, 0.35, 1)
+	glow.Size = UDim2.fromScale(0.8, 0.8)
+	if tier >= 3 then
+		local rays = addImage(UiAssets.Textures.sunburst, 0.55, 2)
+		TweenService:Create(rays, TweenInfo.new(8, Enum.EasingStyle.Linear, Enum.EasingDirection.In, -1), {
+			Rotation = 360,
+		}):Play()
+	end
+	if tier >= 5 then
+		local rays2 = addImage(UiAssets.Textures.sunburst, 0.7, 3)
+		rays2.Size = UDim2.fromScale(0.75, 0.75)
+		rays2.Rotation = 22
+		TweenService:Create(rays2, TweenInfo.new(11, Enum.EasingStyle.Linear, Enum.EasingDirection.In, -1), {
+			Rotation = 22 - 360,
+		}):Play()
+	end
+
+	local root = model.PrimaryPart
+	if root then
+		local light = Instance.new("PointLight")
+		light.Name = "CatchLight"
+		light.Color = color
+		light.Range = 14
+		light.Brightness = 0
+		light.Parent = root
+		TweenService:Create(light, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Brightness = 4,
+		}):Play()
+		task.delay(0.2, function()
+			if light.Parent then
+				TweenService:Create(light, TweenInfo.new(0.6), { Brightness = 1.5 }):Play()
+			end
+		end)
+	end
+
+	spawnEmergeDust(pos - Vector3.new(0, baseSize * 0.3, 0), color, true)
+end
+
+-- Pop a UIScale from 0 to `peak` and back to 1 (Back Out), like the motion spec's "name in"
+local function popScale(scale: UIScale, peak: number, duration: number)
+	scale.Scale = 0
+	local up = TweenService:Create(scale, TweenInfo.new(duration * 0.6, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+		Scale = peak,
+	})
+	up.Completed:Connect(function()
+		TweenService:Create(scale, TweenInfo.new(duration * 0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Scale = 1,
+		}):Play()
+	end)
+	up:Play()
+end
+
 local function runRevealCutscene(finalPos: Vector3, baitModel: Model, payload: any)
 	inRevealCutscene = true
 	localPlayer:SetAttribute("InRevealCutscene", true)
@@ -884,6 +964,8 @@ local function runRevealCutscene(finalPos: Vector3, baitModel: Model, payload: a
 
 	local slimeModel: Model? = nil
 	local cam = workspace.CurrentCamera
+	local baseFov = if cam then cam.FieldOfView else 70 -- restored in the teardown (the shot director changes it)
+	local showcaseActive = false -- keeps the hovering showcase loop (SlimeMotion.Showcase) running
 
 	local ok, err = pcall(function()
 		TweenService:Create(fadeOverlay, TweenInfo.new(0.22), { BackgroundTransparency = 0 }):Play()
@@ -892,7 +974,12 @@ local function runRevealCutscene(finalPos: Vector3, baitModel: Model, payload: a
 		local landedZone = ThrowPhysics.GetZoneAtZ(math.max(0, finalPos.Z))
 		local floorY = landedZone.FloorY
 		-- Clamp staging strictly inside the open lane corridor and away from cliff walls
-		local stageX = math.clamp(finalPos.X, -(landedZone.ClearHalfWidth - 11), landedZone.ClearHalfWidth - 4)
+		-- (the emerge spot is REVEAL_EMERGE_DIST studs to the -X side of the bait, so keep that much room)
+		local stageX = math.clamp(
+			finalPos.X,
+			-(landedZone.ClearHalfWidth - (REVEAL_EMERGE_DIST + 2)),
+			landedZone.ClearHalfWidth - 4
+		)
 		local stageZ = math.clamp(finalPos.Z, landedZone.StartZ + 3.0, landedZone.EndZ - 3.0)
 		-- If near the far cliff edge of a zone (or Zone 5 end wall), flip camera to the open -Z side!
 		local camSideZ = if stageZ > landedZone.EndZ - 14.0 then -1 else 1
@@ -900,23 +987,47 @@ local function runRevealCutscene(finalPos: Vector3, baitModel: Model, payload: a
 
 		local baitGroundPos = Vector3.new(stageX + 1.5, floorY + 0.55, stageZ)
 
-		-- 6 waypoints (Emergence at 10.5 studs away + 5 slow hops right up to the thrown bait!)
-		local hopWaypoints = {
-			Vector3.new(stageX - 9.0, floorY + 1.22, stageZ + 1.4 * emergeDz), -- 1. Emergence spot
-			Vector3.new(stageX - 7.1, floorY + 1.22, stageZ + 1.1 * emergeDz), -- 2. After Hop 1
-			Vector3.new(stageX - 5.3, floorY + 1.22, stageZ + 0.8 * emergeDz), -- 3. After Hop 2
-			Vector3.new(stageX - 3.7, floorY + 1.22, stageZ + 0.5 * emergeDz), -- 4. After Hop 3
-			Vector3.new(stageX - 2.3, floorY + 1.22, stageZ + 0.3 * emergeDz), -- 5. After Hop 4
-			Vector3.new(stageX - 1.1, floorY + 1.22, stageZ + 0.1 * emergeDz), -- 6. After Hop 5 (right beside the bait!)
-		}
+		-- REVEAL_STEPS + 1 waypoints: emerge ~15 studs away, then steps that get shorter as it creeps up on
+		-- the bait, along a gentle curve. hopWaypoints[1] = emerge spot, hopWaypoints[REVEAL_STEPS + 1] = beside the bait.
+		local hopWaypoints: { Vector3 } = {}
+		for i = 0, REVEAL_STEPS do
+			local a = i / REVEAL_STEPS
+			local e = 1 - (1 - a) ^ 1.4
+			local x = (stageX - REVEAL_EMERGE_DIST) + ((stageX - 1.1) - (stageX - REVEAL_EMERGE_DIST)) * e
+			local zOff = (2.0 + (0.1 - 2.0) * e) + 1.0 * math.sin(a * math.pi)
+			table.insert(hopWaypoints, Vector3.new(x, floorY + 1.22, stageZ + zOff * emergeDz))
+		end
 
 		SlimeFactory.PositionBait(baitModel, CFrame.new(baitGroundPos) * CFrame.Angles(0, math.rad(35), 0))
 
 		local slimeId = payload.CaughtSlimeId or "meadow_sprout"
 		local mutId = payload.CaughtMutation or "NORMAL"
+		local def = GameConfig.SlimesById[slimeId] or GameConfig.Slimes[1]
+		local tier = RARITY_TIER[def.Rarity] or 1
 		local createdSlime = SlimeFactory.CreateSlimeModel(slimeId, false, mutId, payload.CaughtIncomePerSec)
 		slimeModel = createdSlime
-		SlimeFactory.SetSilhouetteMode(createdSlime, true)
+		-- Slimes the player already discovered are shown in full colour the whole time; only new ones start
+		-- as a black silhouette that clears up as they get closer to the bait.
+		local isNew = payload.IsNewDiscovery == true
+		-- New discoveries and Rare+ get the full exaggerated show; repeat Common/Uncommon catches the lite one
+		local full = isNew or tier >= CatchFxData.FullShowMinTier
+		if isNew then
+			SlimeFactory.BeginWorldSilhouette(createdSlime)
+		end
+		local rig = SlimeMotion.NewRig(createdSlime, SlimeMotion.GetStyle(slimeId))
+		-- Face personality (CatchFxData.Personality): sleepy slimes blink slowly, happy ones bounce on the float-up
+		local personality = CatchFx.GetPersonality(createdSlime)
+		if personality == "Sleepy" then
+			rig.BlinkTime = 0.32
+		elseif personality == "Happy" then
+			rig.Bouncy = true
+		end
+		local fx: SlimeMotion.Fx = {
+			Color = SlimeFactory.ToColor3(landedZone.ThemeColor),
+			Ripple = spawnGroundRipple,
+			Dust = spawnEmergeDust,
+			Landed = CatchFx.Landed,
+		}
 		SlimeFactory.PositionSlime(
 			createdSlime,
 			CFrame.lookAt(
@@ -932,104 +1043,362 @@ local function runRevealCutscene(finalPos: Vector3, baitModel: Model, payload: a
 			table.insert(rayExclude, localPlayer.Character)
 		end
 
+		-- SHOT DIRECTOR: the camera works through a shot list (CatchFxData.Shots) - establishing wide shot,
+		-- ground-level close-up, side tracking, over-the-bait, close-up, then the showcase framing above the
+		-- name title. The same per-frame step clears the silhouette as the slime closes in on the bait.
+		local restY = floorY + 1.22
+		local emergeSpot = hopWaypoints[1]
+		local walkDist = math.max(1, (Vector3.new(emergeSpot.X, 0, emergeSpot.Z) - Vector3.new(baitGroundPos.X, 0, baitGroundPos.Z)).Magnitude)
+		local slimeSize = (createdSlime:GetAttribute("BaseSize") :: number?) or 2.4
+		local viewDir = Vector3.new(0.25, 0.32, camSideZ).Unit
+		local camTarget = Vector3.new(emergeSpot.X, restY, emergeSpot.Z)
+		local camSnapped = false
+		local revealStarted = false -- stops the gradual silhouette so it does not fight the reveal fade
+		-- Showcase: the camera freezes (so the float-up shows on screen) and can shake on big catches
+		local camLocked = false
+		local lockedCf = CFrame.identity
+		local shakeUntil = 0
+		local shakeLength = 0.3
+		local walkCy = 0 -- screen Y (px) the walk framing keeps the slime at
 		if cam then
 			cam.CameraType = Enum.CameraType.Scriptable
-			local camPos = Vector3.new(stageX - 2.4, floorY + 3.6, stageZ + 11.2 * camSideZ)
-			local lookTarget = Vector3.new(stageX - 2.8, floorY + 1.1, stageZ + 0.3 * emergeDz)
-			cam.CFrame = safeRevealCamCFrame(camPos, lookTarget, rayExclude)
 		end
+
+		-- Zone screen mood + per-slime effects (CatchFxData). DebugForceZoneFx (Studio only) swaps the zone look.
+		local fxZone = landedZone.Index
+		if RunService:IsStudio() then
+			local forced = ReplicatedStorage:GetAttribute("DebugForceZoneFx")
+			if type(forced) == "number" and forced >= 1 and forced <= #GameConfig.Zones then
+				fxZone = math.floor(forced)
+			end
+		end
+		local stageCenter = (hopWaypoints[1] + hopWaypoints[REVEAL_STEPS + 1]) * 0.5
+		local zonePreset = CatchFxData.Zones[fxZone] or CatchFxData.Zones[1]
+		if cam then
+			CatchFx.Start({
+				Model = createdSlime,
+				SlimeId = slimeId,
+				ZoneIndex = fxZone,
+				StageCenter = stageCenter,
+				FloorY = floorY,
+				Camera = cam,
+				RevealRoot = revealRoot,
+				Shake = function(seconds: number)
+					shakeLength = math.max(0.05, seconds)
+					shakeUntil = os.clock() + shakeLength
+				end,
+				Full = full,
+				EmergePos = Vector3.new(emergeSpot.X, floorY, emergeSpot.Z),
+				BaitPos = baitGroundPos,
+				ViewDir = viewDir,
+			})
+			if not isNew then
+				CatchFx.BeginWalk() -- known slimes are visible from the start
+			end
+		end
+
+		-- Shot parameters: CatchFxData.Shots[kind] with the zone's overrides on top
+		local function shotParams(kind: string): { [string]: number }
+			local merged: { [string]: number } = {}
+			for k, v in (CatchFxData.Shots :: any)[kind] or {} do
+				merged[k] = v
+			end
+			local overrides = zonePreset.Shots and zonePreset.Shots[kind]
+			if overrides then
+				for k, v in overrides do
+					merged[k] = v
+				end
+			end
+			return merged
+		end
+
+		local flatView = Vector3.new(viewDir.X, 0, viewDir.Z).Unit
+		local walkRight = Vector3.new(baitGroundPos.X - emergeSpot.X, 0, baitGroundPos.Z - emergeSpot.Z)
+		walkRight = if walkRight.Magnitude > 0.01 then walkRight.Unit else Vector3.new(1, 0, 0)
+		local shotKind = if full then "Establish" else "Track"
+		local shotT0 = os.clock()
+		local shotBlend = 0
+		local shotCut = true
+		local camBase = if cam then cam.CFrame else CFrame.identity
+		local curFov = baseFov
+		local punchKind = ""
+		local punchT0 = -1
+
+		local function setShot(kind: string, blend: number)
+			shotKind = kind
+			shotT0 = os.clock()
+			shotBlend = blend
+			if blend <= 0 then
+				shotCut = true
+			end
+		end
+		-- FOV punches: "Burst" (pull in, then kick out wide) and "Hero" (wide, settling back)
+		local function punch(kind: string)
+			punchKind = kind
+			punchT0 = os.clock()
+		end
+		local function punchOffset(): number
+			if punchT0 < 0 then
+				return 0
+			end
+			local t = os.clock() - punchT0
+			if punchKind == "Burst" then
+				if t < 0.1 then
+					return -8 * (t / 0.1)
+				elseif t < 0.25 then
+					return -8 + 18 * ((t - 0.1) / 0.15)
+				elseif t < 0.8 then
+					return 10 * (1 - (t - 0.25) / 0.55)
+				end
+				return 0
+			end
+			if t < 0.9 then
+				return 12 * (1 - t / 0.9) ^ 2
+			end
+			return 0
+		end
+		local function shakeOffset(): CFrame
+			local left = shakeUntil - os.clock()
+			if left <= 0 then
+				return CFrame.identity
+			end
+			local k = 0.3 * (left / shakeLength)
+			return CFrame.new((math.random() * 2 - 1) * k, (math.random() * 2 - 1) * k, 0)
+		end
+		local function withDutch(cf: CFrame, deg: number?): CFrame
+			return if deg and deg ~= 0 then cf * CFrame.Angles(0, 0, math.rad(deg)) else cf
+		end
+
+		-- Where the current shot wants the camera (and its FOV)
+		local function shotGoal(c: Camera, t: number): (CFrame, number)
+			local prm = shotParams(shotKind)
+			if shotKind == "Establish" then
+				local focus = CatchFx.GetFocus() or stageCenter
+				local mid = (focus + stageCenter) * 0.5
+				local back = (prm.Back or 22) * (1 - (prm.Push or 0) * math.clamp(t / 0.9, 0, 1))
+				local pos = mid + flatView * back + Vector3.new(0, prm.Up or 10, 0)
+				return safeRevealCamCFrame(pos, mid, rayExclude), prm.Fov or 60
+			elseif shotKind == "Ground" then
+				local spot = Vector3.new(emergeSpot.X, floorY, emergeSpot.Z)
+				local pos = spot + flatView * (prm.Back or 5) - walkRight * (prm.Side or 1.5) + Vector3.new(0, prm.Up or 0.7, 0)
+				local look = Vector3.new(spot.X, math.max(floorY + 1, camTarget.Y), spot.Z)
+				return withDutch(safeRevealCamCFrame(pos, look, rayExclude), prm.Dutch), prm.Fov or 55
+			elseif shotKind == "Front" then
+				local toBait = Vector3.new(baitGroundPos.X - camTarget.X, 0, baitGroundPos.Z - camTarget.Z)
+				toBait = if toBait.Magnitude > 0.01 then toBait.Unit else walkRight
+				local pos = Vector3.new(baitGroundPos.X, floorY, baitGroundPos.Z)
+					+ toBait * (prm.Back or 3.6)
+					+ flatView * (prm.Side or 0.9)
+					+ Vector3.new(0, prm.Up or 1.3, 0)
+				return withDutch(safeRevealCamCFrame(pos, camTarget + Vector3.new(0, 0.3, 0), rayExclude), prm.Dutch), prm.Fov or 62
+			elseif shotKind == "Close" then
+				-- Zoom-out: fast whoosh back, then settle (Push still works as a negative pull)
+				local k = math.clamp(t / (prm.PullTime or 0.7), 0, 1)
+				local eased = 1 - (1 - k) ^ 3
+				local pull = (prm.Pull or 0) - (prm.Push or 0)
+				local back = (prm.Back or 6) * (1 + pull * eased)
+				local pos = camTarget + viewDir * back + Vector3.new(0, prm.Up or 1.8, 0)
+				return safeRevealCamCFrame(pos, camTarget + Vector3.new(0, 0.2, 0), rayExclude), prm.Fov or 60
+			end
+			-- Track / AboveTitle: keep the slime centred above the name title
+			local goal, cy = frameSlimeAboveTitle(c, camTarget, slimeSize, viewDir, rayExclude, baseFov)
+			walkCy = cy
+			local sway = if shotKind == "Track" then (prm.Sway or 0) else 0
+			if sway > 0 then
+				goal = goal * CFrame.new(math.sin(t * 1.3) * sway, math.sin(t * 1.9) * sway * 0.6, 0)
+			end
+			return goal, baseFov
+		end
+
+		RunService:BindToRenderStep(REVEAL_CAM_BIND, Enum.RenderPriority.Camera.Value + 1, function(dt: number)
+			CatchFx.Update(dt)
+			if camLocked then
+				if cam then
+					camBase = camBase:Lerp(lockedCf, 1 - math.exp(-dt * 10))
+					cam.CFrame = camBase * shakeOffset()
+					cam.FieldOfView = baseFov + punchOffset() + CatchFx.GetFovOffset()
+				end
+				return
+			end
+			local root = createdSlime.PrimaryPart
+			if not root or not createdSlime.Parent then
+				return
+			end
+			local p = root.Position
+			-- Never aim below the ground line (the slime starts buried); smooth Y harder so flyer bobs stay calm
+			local want = Vector3.new(p.X, math.max(p.Y, restY), p.Z)
+			local a = 1 - math.exp(-dt * 6)
+			local ay = 1 - math.exp(-dt * 3)
+			camTarget = Vector3.new(
+				camTarget.X + (want.X - camTarget.X) * a,
+				camTarget.Y + (want.Y - camTarget.Y) * ay,
+				camTarget.Z + (want.Z - camTarget.Z) * a
+			)
+			if cam then
+				local goal, goalFov = shotGoal(cam, os.clock() - shotT0)
+				if shotCut or not camSnapped then
+					camBase = goal
+					curFov = goalFov
+					shotCut = false
+					camSnapped = true
+				else
+					local k = if shotBlend > 0 then 3 / shotBlend else 8
+					local b = 1 - math.exp(-dt * k)
+					camBase = camBase:Lerp(goal, b)
+					curFov += (goalFov - curFov) * b
+				end
+				cam.CFrame = camBase * shakeOffset()
+				cam.FieldOfView = curFov + punchOffset() + CatchFx.GetFovOffset()
+			end
+
+			if isNew and not revealStarted and createdSlime:FindFirstChild("RevealShade") then
+				local d = (Vector3.new(p.X, 0, p.Z) - Vector3.new(baitGroundPos.X, 0, baitGroundPos.Z)).Magnitude
+				local progress = math.clamp(1 - d / walkDist, 0, 1)
+				local s = progress * progress * (3 - 2 * progress)
+				SlimeFactory.SetSilhouetteAmount(createdSlime, 1 - 0.8 * s)
+				-- its own effects (spinning halo, glowing caps...) switch on once it is half visible
+				if progress >= 0.45 then
+					CatchFx.BeginWalk()
+				end
+			end
+		end)
 
 		local targetOdds = math.max(1, tonumber(payload.OddsOneInX) or 4)
 		local shortWord = tostring(payload.CaughtShortWord or "SLIME")
 		superLuckyLabel.Visible = false
+		caughtStamp.Visible = false
 		finalInfoFrame.Visible = false
+		finalInfoScale.Scale = 1
 		oddsLabel.Text = "1 in 1"
 		revealRoot.Visible = true
 
+		-- Full show: the zone's intro prop (snow mound, lava pool, gift box...) is in place before the fade-in
+		if full then
+			CatchFx.IntroBuild()
+		end
+
 		TweenService:Create(fadeOverlay, TweenInfo.new(0.25), { BackgroundTransparency = 1 }):Play()
 
-		-- STAGE A: Longer (~1.70s) Slow Underground Peek & Pop-Out!
-		animateLongerUndergroundEmergence(createdSlime, hopWaypoints[1], floorY, baitGroundPos)
-
-		-- STAGE B: 5 slow, unhurried hops creeping toward the thrown Jelly Bait (~2.85s)!
-		local oddsSteps = {
-			math.max(1, math.floor(targetOdds * 0.12)),
-			math.max(1, math.floor(targetOdds * 0.26)),
-			math.max(1, math.floor(targetOdds * 0.45)),
-			math.max(1, math.floor(targetOdds * 0.68)),
-			math.max(1, math.floor(targetOdds * 0.88)),
-		}
-
-		for step = 1, 5 do
-			oddsLabel.Text = `1 in {oddsSteps[step]}`
-
-			if cam then
-				local targetCamPos = Vector3.new(
-					stageX - 2.2 + step * 0.36,
-					floorY + 3.5 - step * 0.08,
-					stageZ + (10.8 - step * 0.45) * camSideZ
-				)
-				local targetLook = Vector3.new(stageX - 2.4 + step * 0.38, floorY + 1.15, stageZ)
-				TweenService:Create(cam, TweenInfo.new(0.46, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
-					CFrame = safeRevealCamCFrame(targetCamPos, targetLook, rayExclude),
-				}):Play()
+		if full then
+			-- SHOT 1 (0.9s): wide establishing shot over the stage and the zone set piece (volcano, blizzard...)
+			task.wait(0.9)
+			-- SHOT 2: hard cut to ground level; the slime struggles out of the prop, SHOT 3 punches on the burst
+			setShot("Ground", 0)
+			fx.PropShake = CatchFx.IntroShake
+			fx.Burst = function()
+				CatchFx.IntroBurst()
+				punch("Burst")
+				shakeLength = 0.25
+				shakeUntil = os.clock() + shakeLength
 			end
+			local style = (zonePreset.Emerge or "Burrow") :: SlimeMotion.EmergeStyle
+			SlimeMotion.EmergeStruggle(rig, hopWaypoints[1], floorY, baitGroundPos, fx, style)
+			-- SHOT 4: blend out to the side tracking shot for the walk
+			setShot("Track", 0.35)
+		else
+			-- Lite show: today's burrow pop-out with the side tracking shot
+			SlimeMotion.Emerge(rig, hopWaypoints[1], floorY, baitGroundPos, fx)
+		end
 
-			animateSlowHopTowardBait(
-				createdSlime,
+		-- STAGE B (~5.1s): REVEAL_STEPS steps toward the bait in the slime's own style (hop / fly / slide / waddle);
+		-- the "1 in X" counter climbs along the same curve as before
+		for step = 1, REVEAL_STEPS do
+			local odds = math.max(1, math.floor(targetOdds * 0.88 * (step / REVEAL_STEPS) ^ 1.25))
+			oddsLabel.Text = `1 in {odds}`
+			if full then
+				-- SHOT 5: cut behind the bait as it creeps toward the camera; SHOT 6: tight close-up for the last step
+				if step == CatchFxData.ShotBeats.Front then
+					setShot("Front", 0)
+				elseif step == CatchFxData.ShotBeats.Close then
+					setShot("Close", 0)
+				end
+			end
+			SlimeMotion.Approach(
+				rig,
 				hopWaypoints[step],
 				hopWaypoints[step + 1],
 				baitGroundPos,
-				0.46,
-				step
+				REVEAL_STEP_TIME,
+				step,
+				fx
 			)
-
-			task.wait(0.12)
+			SlimeMotion.Hold(rig, REVEAL_STEP_HOLD)
 		end
 
-		-- Curious sniff lean toward the bait right before the burst!
-		local finalSlimePos = hopWaypoints[6]
-		SlimeFactory.PositionSlime(
-			createdSlime,
-			CFrame.lookAt(finalSlimePos + Vector3.new(0.35, 0, 0), baitGroundPos),
-			-0.15
-		)
-		task.wait(0.32)
+		-- Eat the bait (~0.55s): lean in, gulp, bounce (flyers land first). SHOT 7: the camera blends to the
+		-- showcase framing above the name title meanwhile.
+		setShot("AboveTitle", if full then 0.4 else 0.25)
+		local finalSlimePos = hopWaypoints[REVEAL_STEPS + 1]
+		SlimeMotion.EatBait(rig, baitModel, finalSlimePos, baitGroundPos)
 
-		-- STAGE C: EXPLOSIVE REVEAL right next to the bait!
-		SlimeFactory.SetSilhouetteMode(createdSlime, false)
-		if cam then
-			SlimeFactory.PositionSlime(
-				createdSlime,
-				CFrame.lookAt(
-					finalSlimePos + Vector3.new(0, 0.5, 0),
-					Vector3.new(cam.CFrame.Position.X, finalSlimePos.Y, cam.CFrame.Position.Z)
-				),
-				-0.30
-			)
-			task.delay(0.15, function()
-				if createdSlime.Parent and cam then
-					SlimeFactory.PositionSlime(
-						createdSlime,
-						CFrame.lookAt(
-							finalSlimePos,
-							Vector3.new(cam.CFrame.Position.X, finalSlimePos.Y, cam.CFrame.Position.Z)
-						),
-						0.18
-					)
-				end
-			end)
-		end
-
-		playShockwaveRings()
+		-- STAGE C: CATCH SHOWCASE. The camera freezes and the slime floats up (spinning) into the middle of the
+		-- screen, right above the name title. New slimes burst from silhouette into colour on the way up.
+		local mutColor = if mutId ~= "NORMAL"
+			then SlimeFactory.GetMutationColor(mutId)
+			else SlimeFactory.GetRarityColor(def.Rarity)
 
 		oddsLabel.Text = `1 in {targetOdds}`
 		superLuckyLabel.Visible = (payload.IsSuperLucky == true)
 
-		local def = GameConfig.SlimesById[slimeId] or GameConfig.Slimes[1]
-		local mutColor = if mutId ~= "NORMAL"
-			then SlimeFactory.GetMutationColor(mutId)
-			else SlimeFactory.GetRarityColor(def.Rarity)
+		revealStarted = true
+		if isNew then
+			SlimeFactory.RevealFromSilhouette(createdSlime, 0.35)
+		end
+
+		local rise = 1.6
+		local faceCam = finalSlimePos + viewDir * 10
+		if cam then
+			-- Lock on the exact showcase framing (the camera finishes blending there while the slime floats)
+			local goal, cy = frameSlimeAboveTitle(cam, camTarget, slimeSize, viewDir, rayExclude, baseFov)
+			lockedCf = goal
+			walkCy = cy
+			camLocked = true
+			if full then
+				punch("Hero")
+			end
+			faceCam = lockedCf.Position
+			-- How far to float so the slime ends ~70 px above the name title, below "CAUGHT!" / SUPER LUCKY
+			local vh = math.max(1, cam.ViewportSize.Y)
+			local tanHalf = math.tan(math.rad(baseFov) * 0.5)
+			local camDist = math.max(1, (lockedCf.Position - finalSlimePos).Magnitude)
+			local pxPerStud = vh / (2 * camDist * tanHalf)
+			local halfSlimePx = slimeSize * 1.08 * 0.5 * pxPerStud
+			local titleTop = finalInfoFrame.AbsolutePosition.Y
+			if titleTop <= 0 then
+				titleTop = vh - 294
+			end
+			local labelsBottom = CAUGHT_STAMP_Y + CAUGHT_STAMP_H + (if superLuckyLabel.Visible then 60 else 0)
+			local cyShow = math.max(titleTop - halfSlimePx - 70, labelsBottom + halfSlimePx + 8)
+			cyShow = math.min(cyShow, walkCy)
+			rise = math.clamp((walkCy - cyShow) / pxPerStud, 0.6, 4)
+		end
+		local topPos = finalSlimePos + Vector3.new(0, rise, 0)
+		SlimeMotion.FloatUp(rig, finalSlimePos, topPos, faceCam, 0.7)
+
+		-- Hover in place until the player continues
+		showcaseActive = true
+		task.spawn(SlimeMotion.Showcase, rig, topPos, faceCam, function()
+			return showcaseActive
+		end)
+
+		-- Highlight the catch: glow / rays / light / sparkles, rings, CAUGHT! stamp, rarity shake + Mythic flash
+		if cam then
+			spawnCatchHighlight(createdSlime, topPos, cam, mutColor, tier)
+		end
+		CatchFx.Showcase() -- zone burst + personality + the slime's signature moment
+		playShockwaveRings()
+		caughtStamp.Visible = true
+		popScale(caughtStampScale, 1.25, 0.35)
+		if tier >= 4 then
+			shakeLength = if tier >= 6 then 0.6 else 0.3
+			shakeUntil = os.clock() + shakeLength
+		end
+		if tier >= 6 then
+			flashFrame.BackgroundTransparency = 0
+			TweenService:Create(flashFrame, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				BackgroundTransparency = 1,
+			}):Play()
+		end
 
 		mutationLabel.Text = if mutId ~= "NORMAL" then mutId else string.upper(def.Rarity)
 		applyTone(mutationLabel, UiKit.TriFromColor(mutColor, 0.6, 0.3))
@@ -1041,6 +1410,7 @@ local function runRevealCutscene(finalPos: Vector3, baitModel: Model, payload: a
 		gemsRow.Visible = gemsEarned > 0
 		newBadge.Visible = (payload.IsNewDiscovery == true)
 		finalInfoFrame.Visible = true
+		popScale(finalInfoScale, 1.15, 0.35)
 
 		-- Click/tap skips immediately, or auto-dismisses cleanly after 3.0s so AFK auto-throw keeps looping
 		local done = false
@@ -1062,6 +1432,7 @@ local function runRevealCutscene(finalPos: Vector3, baitModel: Model, payload: a
 
 		TweenService:Create(fadeOverlay, TweenInfo.new(0.22), { BackgroundTransparency = 0 }):Play()
 		task.wait(0.24)
+		showcaseActive = false
 	end)
 
 	if not ok then
@@ -1069,6 +1440,16 @@ local function runRevealCutscene(finalPos: Vector3, baitModel: Model, payload: a
 	end
 
 	-- Guaranteed teardown so fadeOverlay never sticks as a black screen
+	pcall(function()
+		RunService:UnbindFromRenderStep(REVEAL_CAM_BIND)
+	end)
+	pcall(CatchFx.Stop)
+	if cam then
+		cam.FieldOfView = baseFov
+	end
+	showcaseActive = false
+	flashFrame.BackgroundTransparency = 1
+	caughtStamp.Visible = false
 	revealRoot.Visible = false
 	if slimeModel then
 		slimeModel:Destroy()

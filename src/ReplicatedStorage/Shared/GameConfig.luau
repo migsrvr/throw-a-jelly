@@ -43,7 +43,11 @@ export type SlimeDef = {
 	IncomePerSec: number,
 	ThrowBonus: number,
 	Weight: number,
+	-- How the slime moves in the catch cutscene (SlimeMotion). nil = "Hop".
+	Motion: SlimeMotionStyle?,
 }
+
+export type SlimeMotionStyle = "Hop" | "Fly" | "Slide" | "Waddle"
 
 export type MutationDef = {
 	Id: "NORMAL" | "EMERALD" | "GOLDEN" | "CRYSTAL" | "RAINBOW",
@@ -745,6 +749,7 @@ GameConfig.Slimes = {
 	},
 	{
 		Id = "crystal_bat",
+		Motion = "Fly",
 		Name = "Bat Slime",
 		ShortWord = "BAT",
 		ZoneIndex = 2,
@@ -843,6 +848,7 @@ GameConfig.Slimes = {
 	},
 	{
 		Id = "lava_phoenix",
+		Motion = "Fly",
 		Name = "Phoenix Slime",
 		ShortWord = "PHOENIX",
 		ZoneIndex = 3,
@@ -893,6 +899,7 @@ GameConfig.Slimes = {
 	},
 	{
 		Id = "frost_glacier",
+		Motion = "Slide",
 		Name = "Glacier Slime",
 		ShortWord = "GLACIER",
 		ZoneIndex = 4,
@@ -909,6 +916,7 @@ GameConfig.Slimes = {
 	},
 	{
 		Id = "frost_penguin",
+		Motion = "Slide",
 		Name = "Penguin Slime",
 		ShortWord = "PENGUIN",
 		ZoneIndex = 4,
@@ -925,6 +933,7 @@ GameConfig.Slimes = {
 	},
 	{
 		Id = "frost_aurora",
+		Motion = "Fly",
 		Name = "Aurora Borealis Slime",
 		ShortWord = "AURORA",
 		ZoneIndex = 4,
@@ -941,6 +950,7 @@ GameConfig.Slimes = {
 	},
 	{
 		Id = "frost_yeti",
+		Motion = "Waddle",
 		Name = "Yeti Slime",
 		ShortWord = "YETI",
 		ZoneIndex = 4,
@@ -1023,6 +1033,7 @@ GameConfig.Slimes = {
 	},
 	{
 		Id = "candy_cotton",
+		Motion = "Fly",
 		Name = "Cotton Cloud Slime",
 		ShortWord = "COTTON",
 		ZoneIndex = 5,
@@ -1055,6 +1066,7 @@ GameConfig.Slimes = {
 	},
 	{
 		Id = "candy_royal",
+		Motion = "Waddle",
 		Name = "Royal Sugar King Slime",
 		ShortWord = "SUGARKING",
 		ZoneIndex = 5,
@@ -1105,6 +1117,7 @@ GameConfig.Slimes = {
 	},
 	{
 		Id = "desert_mummy",
+		Motion = "Waddle",
 		Name = "Mummy Slime",
 		ShortWord = "MUMMY",
 		ZoneIndex = 6,
@@ -1137,6 +1150,7 @@ GameConfig.Slimes = {
 	},
 	{
 		Id = "desert_djinn",
+		Motion = "Fly",
 		Name = "Djinn Slime",
 		ShortWord = "DJINN",
 		ZoneIndex = 6,
@@ -1153,6 +1167,7 @@ GameConfig.Slimes = {
 	},
 	{
 		Id = "desert_pharaoh",
+		Motion = "Waddle",
 		Name = "Pharaoh Slime",
 		ShortWord = "PHARAOH",
 		ZoneIndex = 6,
@@ -1171,6 +1186,7 @@ GameConfig.Slimes = {
 	-- Zone 7: Acid Swamp
 	{
 		Id = "acid_sludge",
+		Motion = "Slide",
 		Name = "Sludge Slime",
 		ShortWord = "SLUDGE",
 		ZoneIndex = 7,
@@ -1235,6 +1251,7 @@ GameConfig.Slimes = {
 	},
 	{
 		Id = "acid_scientist",
+		Motion = "Waddle",
 		Name = "Mad Scientist Slime",
 		ShortWord = "SCIENTIST",
 		ZoneIndex = 7,
@@ -1278,6 +1295,9 @@ for _, slime in GameConfig.Slimes do
 	end
 	table.insert(GameConfig.SlimesByZone[slime.ZoneIndex], slime)
 end
+
+-- Catch-cutscene movement styles a SlimeDef.Motion may use (SlimeMotion.luau implements each one)
+GameConfig.SlimeMotionStyles = { Hop = true, Fly = true, Slide = true, Waddle = true } :: { [string]: boolean }
 
 GameConfig.PullUpTiers = {
 	{ Tier = 1, Name = "PULL-UP BAR", Cost = 0, XPPerRep = 2, SpeedMult = 1.0 },
