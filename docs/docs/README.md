@@ -53,4 +53,16 @@ Scripts sync from the repo through Rojo, but **models and meshes do not** (they 
 - **Alternative:** File > Save to File As > `scratch/place-copy.rbxl`, then run the checker on that file.
 - **Do not run `scripts/pull-from-place` to get models.** It replaces `src/` and only handles scripts. It needs `--force`.
 
+## Mobile and low-end devices
+
+- **Graphics setting:** players pick Auto / Low / High in the Settings window (saved). `DeviceProfile.luau` turns
+  that into a detail tier: Auto uses the Roblox graphics level (phones start at Medium) and drops a tier if the game
+  runs below 35 fps. Low = no shadows, flat lighting, closer fog, tiniest decorations hidden, fewer cutscene parts
+  and particles, no bloom, far lights off, fewer flowers.
+- **Music:** add Roblox audio asset ids to `GameConfig.Music.Tracks` (they play shuffled). The Settings window has a
+  saved Music On / Off switch.
+- **Plot slimes are animated on each device** (`PlotSlimeAnimator.client.luau`); the server only picks where they walk.
+- **One-time Studio step:** paste `scripts/studio/mobile-settings.lua` into the Command Bar, then save and publish.
+  It lowers the streaming radius and turns on low-detail meshes for far zones (properties scripts can't set).
+
 Recorded game clips used as visual reference are in `docs/context-clips/`.

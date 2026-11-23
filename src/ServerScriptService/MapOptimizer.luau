@@ -225,11 +225,60 @@ local function deconflictHub(hub: Instance)
 	end
 end
 
+-- MOBILE: flat, ground-level parts (lane tiles, floors, lines, paths, veins) never cast a visible shadow, but with
+-- ShadowMap every caster costs shadow-map time on mid-range phones. Turn CastShadow off on them.
+local FLAT_NAMES = {
+	Tile = true,
+	DirtFill = true,
+	EdgeLine = true,
+	DistanceLine = true,
+	CenterDash = true,
+	DistanceText = true,
+	StepFace = true,
+	LandingArea = true,
+	Walkway = true,
+	ToThrowLine = true,
+	Check = true,
+	Floor = true,
+	Border = true,
+	Vein = true,
+}
+local FLAT_FOLDERS = { Lane = true, Ground = true, Paths = true, MagmaVeins = true, ThrowLine = true }
+
+local function disableFlatShadows(root: Instance, floorY: number): number
+	local n = 0
+	for _, d in root:GetDescendants() do
+		if d:IsA("BasePart") and d.CastShadow then
+			local parent = d.Parent
+			local byName = FLAT_NAMES[d.Name] == true or (parent ~= nil and FLAT_FOLDERS[parent.Name] == true)
+			local top = d.Position.Y + d.Size.Y * 0.5
+			local byShape = d.Size.Y <= 1 and math.abs(top - floorY) <= 0.6
+			if byName or byShape then
+				d.CastShadow = false
+				n += 1
+			end
+		end
+	end
+	return n
+end
+
 function MapOptimizer.OptimizeMap(mapRoot: Instance?)
 	local map = mapRoot or workspace:FindFirstChild("Map")
 	if not map then
 		return
 	end
+	local flat = 0
+	local hubForShadows = map:FindFirstChild("Hub")
+	if hubForShadows then
+		flat += disableFlatShadows(hubForShadows, 30.0)
+	end
+	local zonesForShadows = map:FindFirstChild("Zones")
+	if zonesForShadows then
+		for _, zone in zonesForShadows:GetChildren() do
+			flat += disableFlatShadows(zone, (zone:GetAttribute("FloorY") :: number?) or 0)
+		end
+	end
+	print(`[MapOptimizer] CastShadow off on {flat} flat floor parts`)
 
 	local hub = map:FindFirstChild("Hub")
 	if hub then

@@ -1503,6 +1503,20 @@ throwBroadcast.OnClientEvent:Connect(function(payload: any)
 	local baitModel = SlimeFactory.CreateJellyBaitModel()
 	baitModel.Parent = workspace
 
+	-- STREAMING (mobile): only the area near the character is loaded, so ask for the middle of the flight and the
+	-- landing zone now; they stream in while the bait flies and the catch cutscene has its floor and walls.
+	if isLocal and workspace.StreamingEnabled then
+		task.spawn(function()
+			pcall(function()
+				local landing = Vector3.new(sim.FinalPosition.X, sim.FinalPosition.Y, sim.FinalPosition.Z)
+				local o = payload.Origin
+				local origin = if o then Vector3.new(o.X, o.Y, o.Z) else landing
+				localPlayer:RequestStreamAroundAsync(landing, 4) -- the landing zone matters most
+				localPlayer:RequestStreamAroundAsync(origin:Lerp(landing, 0.5), 4)
+			end)
+		end)
+	end
+
 	-- Live luck ticker: replays the server's GameConfig.ComputeFlightLuck as the bait flies, so the
 	-- top-centre "1.XXx LUCK" climbs with distance and ends exactly on the server's LuckMultiplier.
 	local meterLuck = tonumber(payload.MeterLuck) or tonumber(payload.LuckMultiplier) or 1.0
@@ -1594,16 +1608,33 @@ throwBroadcast.OnClientEvent:Connect(function(payload: any)
 	end)
 end)
 
+-- MOBILE: the attribute, the aim pose and the meter visibility are only touched when they change (the aim pose is
+-- re-tried a few times a second while at the line, in case it couldn't start yet); the meter itself animates per frame.
+local lastNear: boolean? = nil
+local aimRetry = 0
+local wasAiming = false
 RunService.RenderStepped:Connect(function(dt: number)
 	local near = checkNearThrowLine()
 	local modalOpen = (localPlayer:GetAttribute("ModalOpen") :: boolean?) == true
 	isAtThrowLine = near
-	localPlayer:SetAttribute("NearThrowLine", near)
+	if near ~= lastNear then
+		lastNear = near
+		localPlayer:SetAttribute("NearThrowLine", near)
+	end
 
 	if near and not modalOpen and not isThrowInFlight and not inRevealCutscene then
-		CharacterAnimator.StartAimPose(localPlayer.Character)
-		autoThrowButton.Visible = ownsAutoThrow
-		meterRoot.Visible = true
+		wasAiming = true
+		aimRetry -= dt
+		if aimRetry <= 0 then
+			aimRetry = 0.25
+			CharacterAnimator.StartAimPose(localPlayer.Character)
+		end
+		if autoThrowButton.Visible ~= ownsAutoThrow then
+			autoThrowButton.Visible = ownsAutoThrow
+		end
+		if not meterRoot.Visible then
+			meterRoot.Visible = true
+		end
 
 		if ownsAutoThrow and autoThrowEnabled then
 			-- Keep the 9-segment vertical meter VISIBLE while AUTO is active and smoothly lock the slider
@@ -1649,10 +1680,16 @@ RunService.RenderStepped:Connect(function(dt: number)
 			end
 		end
 	else
-		meterRoot.Visible = false
-		autoThrowButton.Visible = false
+		aimRetry = 0
+		if meterRoot.Visible then
+			meterRoot.Visible = false
+		end
+		if autoThrowButton.Visible then
+			autoThrowButton.Visible = false
+		end
 		autoIdleClock = 0
-		if not isThrowInFlight then
+		if not isThrowInFlight and wasAiming then
+			wasAiming = false
 			CharacterAnimator.StopAimPose()
 		end
 	end

@@ -47,7 +47,17 @@ local function adorneePosition(bb: BillboardGui): Vector3?
 	return nil
 end
 
-RunService.RenderStepped:Connect(function()
+-- MOBILE: 15 updates a second is plenty for a size change, and signs farther than FAR are skipped (they are
+-- at MIN_SCALE long before that); a scale is only written when it actually changes.
+local UPDATE_HZ = 15
+local FAR = 300
+local acc = 0
+RunService.RenderStepped:Connect(function(dt: number)
+	acc += dt
+	if acc < 1 / UPDATE_HZ then
+		return
+	end
+	acc = 0
 	local cam = workspace.CurrentCamera
 	if not cam then
 		return
@@ -58,10 +68,16 @@ RunService.RenderStepped:Connect(function()
 			trackedSigns[bb] = nil
 			continue
 		end
+		if not bb.Enabled then
+			continue
+		end
 		local pos = adorneePosition(bb)
 		if pos then
 			local dist = (pos - camPos).Magnitude
-			scale.Scale = math.clamp(NEAR / math.max(dist, 1), MIN_SCALE, 1)
+			local s = if dist > FAR then MIN_SCALE else math.clamp(NEAR / math.max(dist, 1), MIN_SCALE, 1)
+			if math.abs(scale.Scale - s) > 0.005 then
+				scale.Scale = s
+			end
 		end
 	end
 end)

@@ -1711,4 +1711,11 @@ function GameConfig.FormatNumber(n: number): string
 	end
 end
 
+-- Background music (MusicController.client.luau). Add Roblox audio asset ids (numbers) to Tracks; they play in a
+-- shuffled loop. Empty = no music (the Settings window Music switch is still shown and saved).
+GameConfig.Music = {
+	Tracks = {} :: { number },
+	Volume = 0.35,
+}
+
 return GameConfig

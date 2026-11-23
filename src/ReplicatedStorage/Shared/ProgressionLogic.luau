@@ -68,6 +68,8 @@ export type PlayerProfile = {
 	ProcessedReceipts: { string }, -- capped recent Developer Product PurchaseIds (saved to DataStore)
 	OwnedPasses: { [string]: boolean }, -- runtime-only Game Pass ownership map (not saved to DataStore)
 	LastSeen: number, -- os.time() of the last save (0 = never); drives Welcome Back offline income
+	GraphicsMode: string, -- "Auto" | "Low" | "High" (Settings window; DeviceProfile picks the detail tier)
+	MusicOn: boolean, -- Settings window music switch (MusicController)
 }
 
 export type GemAward = {
@@ -183,6 +185,8 @@ function ProgressionLogic.CreateInitialProfile(): PlayerProfile
 		ProcessedReceipts = {},
 		OwnedPasses = {},
 		LastSeen = 0,
+		GraphicsMode = "Auto",
+		MusicOn = true,
 	}
 	local starter = makeSlimeInstance(profile, "meadow_sprout", "NORMAL")
 	profile.PlacedSlimesBySlot[1] = starter

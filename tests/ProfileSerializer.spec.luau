@@ -152,6 +152,23 @@ return function(t: any)
 			expect(p.BaitTier).toBe(1)
 			expect(p.LastDailyClaimDay).toBe(-1)
 			expect(#p.PlacedSlimes).toBe(1) -- starter slime kept when the save has no slime data
+			expect(p.GraphicsMode).toBe("Auto")
+		end)
+
+		it("keeps a valid Graphics setting and resets an unknown one to Auto", function()
+			local saved = ProfileSerializer.Serialize(ProfileSerializer.Deserialize({ GraphicsMode = "Low" }))
+			expect(saved.GraphicsMode).toBe("Low")
+			expect(ProfileSerializer.Deserialize(saved).GraphicsMode).toBe("Low")
+			expect(ProfileSerializer.Deserialize({ GraphicsMode = "Ultra" }).GraphicsMode).toBe("Auto")
+			expect(ProfileSerializer.Deserialize({ GraphicsMode = 3 }).GraphicsMode).toBe("Auto")
+		end)
+
+		it("keeps the Music switch, defaulting to on", function()
+			expect(ProfileSerializer.Deserialize({}).MusicOn).toBe(true)
+			local saved = ProfileSerializer.Serialize(ProfileSerializer.Deserialize({ MusicOn = false }))
+			expect(saved.MusicOn).toBe(false)
+			expect(ProfileSerializer.Deserialize(saved).MusicOn).toBe(false)
+			expect(ProfileSerializer.Deserialize({ MusicOn = "off" }).MusicOn).toBe(true)
 		end)
 
 		it("clamps out-of-range and non-finite numbers", function()

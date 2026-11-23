@@ -136,8 +136,12 @@ function ProfileSerializer.Serialize(profile: ProgressionLogic.PlayerProfile): {
 		DailyQuestDay = profile.DailyQuestDay,
 		DailyQuests = dailyQuests,
 		ProcessedReceipts = receipts,
+		GraphicsMode = profile.GraphicsMode,
+		MusicOn = profile.MusicOn,
 	}
 end
+
+ProfileSerializer.GraphicsModes = { Auto = true, Low = true, High = true }
 
 -- Always returns a usable profile. `data` may be nil (new player) or any shape (old / corrupt save).
 function ProfileSerializer.Deserialize(data: any): ProgressionLogic.PlayerProfile
@@ -288,6 +292,13 @@ function ProfileSerializer.Deserialize(data: any): ProgressionLogic.PlayerProfil
 	local trail = finite(data.EquippedTrailZone)
 	if trail and GameConfig.Zones[math.floor(trail)] then
 		p.EquippedTrailZone = math.floor(trail)
+	end
+
+	if type(data.GraphicsMode) == "string" and ProfileSerializer.GraphicsModes[data.GraphicsMode] then
+		p.GraphicsMode = data.GraphicsMode
+	end
+	if type(data.MusicOn) == "boolean" then
+		p.MusicOn = data.MusicOn
 	end
 
 	return p

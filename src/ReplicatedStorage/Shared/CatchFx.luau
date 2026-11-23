@@ -19,6 +19,7 @@
 local TweenService = game:GetService("TweenService")
 
 local CatchFxData = require(script.Parent:WaitForChild("CatchFxData"))
+local DeviceProfile = require(script.Parent:WaitForChild("DeviceProfile"))
 local CatchSetPieces = require(script.Parent:WaitForChild("CatchSetPieces"))
 local SlimeFactory = require(script.Parent:WaitForChild("SlimeFactory"))
 local UiAssets = require(script.Parent:WaitForChild("UiAssets"))
@@ -392,11 +393,19 @@ local function anchorPart(s: Session, cf: CFrame, size: Vector3?): Part
 	return p
 end
 
+local ambientCount: { [any]: number } = setmetatable({}, { __mode = "k" }) :: any
+
+-- Particle rates and burst counts scale with the device tier (DeviceProfile: Low 0.4, Mid 0.7, High 1)
 local function emitterOn(parent: Instance, sp: Spec): ParticleEmitter
 	local e = Instance.new("ParticleEmitter")
 	applySpec(e, sp)
+	e.Rate = sp.Rate * DeviceProfile.Settings().Particles
 	e.Parent = parent
 	return e
+end
+
+local function emitN(e: ParticleEmitter, count: number)
+	e:Emit(math.max(1, math.floor(count * DeviceProfile.Settings().Particles + 0.5)))
 end
 
 local function opSpec(op: Op): Spec
@@ -707,7 +716,7 @@ local function runOp(s: Session, op: Op, phase: string, at: Vector3?)
 		for _, parent in parents do
 			local a = attachmentOn(parent)
 			local e = emitterOn(a, sp)
-			e:Emit(math.max(1, math.floor(count / #parents)))
+			emitN(e, count / #parents)
 			task.delay(4, function()
 				a:Destroy()
 			end)
@@ -742,7 +751,7 @@ local function runOp(s: Session, op: Op, phase: string, at: Vector3?)
 		pcall(function()
 			(e :: any).Shape = Enum.ParticleEmitterShape.Box
 		end)
-		e:Emit(op.Count or 20)
+		emitN(e, op.Count or 20)
 	elseif kind == "Cannon" then
 		local cam = s.Ctx.Camera
 		local c = slimeCentre(s)
@@ -756,9 +765,15 @@ local function runOp(s: Session, op: Op, phase: string, at: Vector3?)
 			sp.Spread = 20
 			sp.Speed = { 10, 16 }
 			local e = emitterOn(p, sp)
-			e:Emit(op.Count or 40)
+			emitN(e, op.Count or 40)
 		end
 	elseif kind == "Ambient" then
+		-- Low tier keeps only the first few ambient particle boxes per cutscene
+		local n = (ambientCount[s] or 0) + 1
+		ambientCount[s] = n
+		if n > DeviceProfile.Settings().AmbientCap then
+			return
+		end
 		local size = op.Size or { 30, 1, 16 }
 		local box = anchorPart(
 			s,
@@ -988,6 +1003,7 @@ function CatchFx.Start(ctx: Ctx)
 	bloom.Intensity = 0
 	bloom.Size = 24
 	bloom.Threshold = 1.2
+	bloom.Enabled = DeviceProfile.Settings().PostFx -- Low tier: no bloom
 	bloom.Parent = ctx.Camera
 
 	local s: Session = {
@@ -1062,7 +1078,7 @@ function CatchFx.Start(ctx: Ctx)
 				end
 				local e = emitterOn(parent, sp)
 				if count > 0 then
-					e:Emit(count)
+					emitN(e, count)
 				end
 				return e
 			end,

@@ -26,6 +26,8 @@ local EVENT_NAMES = {
 	"RequestSellSlime", -- C->S { SlimeUid: string } | { Mode = "All" }: sell unwanted backpack slimes for Cash
 	"OpenSellShop", -- S->C: opened by Hub.SellShop prompt to show the My Slimes / Sell window
 	"RequestEquipTrail",
+	"RequestSetGraphics", -- C->S { Mode = "Auto" | "Low" | "High" }: Settings window graphics choice (saved)
+	"RequestSetMusic", -- C->S { On: boolean }: Settings window music switch (saved)
 	"RequestClaimDaily", -- C->S: manual daily reward claim on the 7-day calendar
 	"RequestClaimQuest", -- C->S { Kind = "Line" | "Daily", Index: number? }: claim completed quest
 	"RequestCollect",

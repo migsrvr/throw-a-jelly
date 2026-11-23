@@ -19,6 +19,12 @@ local TweenService = game:GetService("TweenService")
 
 local UiAssets = require(script.Parent:WaitForChild("UiAssets"))
 local CatchFlowers = require(script.Parent:WaitForChild("CatchFlowers"))
+local DeviceProfile = require(script.Parent:WaitForChild("DeviceProfile"))
+
+-- Detail level of this device: 0 = Low, 1 = Mid, 2 = High (DeviceProfile tier)
+local function detail(): number
+	return DeviceProfile.Settings().Detail
+end
 
 local CatchSetPieces = {}
 
@@ -53,9 +59,9 @@ type SetPiece = {
 	Climax: (env: Env, pos: Vector3) -> (),
 }
 
--- Per cutscene. Busiest: the Meadow (~400 at the climax: giant flowers, path blooms, flower ring; the bush is gone
--- by then) and the volcano (~120 static parts plus short-lived bombs / splats)
-local MAX_PARTS = 500
+-- Part budget per cutscene comes from the device tier (DeviceProfile.CutsceneParts: Low 220, Mid 360, High 500).
+-- Busiest at High: the Meadow (~400 at the climax) and the volcano (~250 with bombs / splats). Lower tiers also
+-- build fewer extras (see detail()), so the budget is rarely hit.
 
 -- ============================================================================
 -- Helpers
@@ -70,7 +76,7 @@ local STUD_FACES = { "TopSurface", "BottomSurface", "LeftSurface", "RightSurface
 
 local function newPart(env: Env, props: { [string]: any }): Part?
 	local n = partCount[env.Folder] or 0
-	if n >= MAX_PARTS then
+	if n >= DeviceProfile.Settings().CutsceneParts then
 		return nil
 	end
 	partCount[env.Folder] = n + 1
@@ -267,6 +273,7 @@ type Plant = {
 	SwayHz: number,
 	Phase: number,
 	Extra: ((t: number) -> CFrame)?, -- extra bend at the stem base (bush rustle / parting)
+	Settled: boolean?, -- grown, open and still: no need to pose it again
 }
 
 local gardens: { [Folder]: { Plant } } = setmetatable({}, { __mode = "k" }) :: any
@@ -292,6 +299,7 @@ local function garden(env: Env): { Plant }
 	env.AddUpdater(function(t, _dt)
 		local parts: { BasePart } = {}
 		local cfs: { CFrame } = {}
+		local swayOn = DeviceProfile.Settings().Sway
 		local i = 1
 		while i <= #list do
 			local p = list[i]
@@ -310,15 +318,19 @@ local function garden(env: Env): { Plant }
 				end
 			end
 			if alive then
-				local bend = CFrame.Angles(
-					p.SwayAmp * math.sin(t * p.SwayHz + p.Phase),
-					0,
-					p.SwayAmp * 0.7 * math.sin(t * p.SwayHz * 1.3 + p.Phase * 1.7)
-				)
-				if p.Extra then
-					bend = p.Extra(t) * bend
+				-- a fully grown flower with nothing moving it is posed once and then skipped (Low tier: no sway)
+				local sway = if swayOn then p.SwayAmp else 0
+				local settled = sway == 0 and p.Extra == nil and grow == 1 and open == 1
+				if not (settled and p.Settled) then
+					local bend = if sway == 0
+						then CFrame.identity
+						else CFrame.Angles(sway * math.sin(t * p.SwayHz + p.Phase), 0, sway * 0.7 * math.sin(t * p.SwayHz * 1.3 + p.Phase * 1.7))
+					if p.Extra then
+						bend = p.Extra(t) * bend
+					end
+					CatchFlowers.Pose(p.F, grow, open, bend, parts, cfs)
+					p.Settled = settled
 				end
-				CatchFlowers.Pose(p.F, grow, open, bend, parts, cfs)
 				i += 1
 			else
 				CatchFlowers.Destroy(p.F)
@@ -388,6 +400,9 @@ local Meadow: SetPiece = {
 	Background = function(env)
 		-- giant flowers swaying behind the stage
 		for i, kind in GIANTS do
+			if detail() == 0 and i % 2 == 0 then
+				continue -- Low: 3 giant flowers
+			end
 			local base = groundAt(env, env.StageCenter + env.Away * (11 + (i % 2) * 3.5) + env.Right * ((i - 3) * 7.5))
 			plant(env, kind, base, { Scale = 3 + math.random() * 0.4, GrowTime = 0.6, OpenDelay = 0.3, OpenTime = 0.5, SwayAmp = 0.06, SwayHz = 1 })
 		end
@@ -417,8 +432,9 @@ local Meadow: SetPiece = {
 		local bush = { Rustle = 0, BurstAt = -1 }
 
 		local plants: { Plant } = {}
-		for i = 1, 10 do
-			local a = (i / 10) * math.pi * 2 + (math.random() - 0.5) * 0.4
+		local count = if detail() == 0 then 6 else 10 -- Low: a smaller bush
+		for i = 1, count do
+			local a = (i / count) * math.pi * 2 + (math.random() - 0.5) * 0.4
 			local dir = toCam * math.cos(a) + side * math.sin(a)
 			dir = if dir.Magnitude > 0.01 then dir.Unit else toCam
 			local front = dir:Dot(toCam) > 0.3
@@ -528,9 +544,11 @@ local Meadow: SetPiece = {
 		}
 	end,
 	Path = function(env, pos, _step)
-		-- three flowers bloom around every step: one each side, one a little further out
+		-- three flowers bloom around every step: one each side, one a little further out (Low: two, shorter-lived)
+		local d = detail()
+		local life = if d == 0 then 2.4 elseif d == 1 then 2.8 else 3.2
 		local toCam = -env.Away
-		for k = 1, 3 do
+		for k = 1, (if d == 0 then 2 else 3) do
 			local off: Vector3
 			local allowTall = true
 			local scale = 1 + math.random() * 0.4
@@ -548,7 +566,7 @@ local Meadow: SetPiece = {
 			end
 			off += env.Right * ((math.random() - 0.5) * 1.4)
 			local kind, color = CatchFlowers.Random(allowTall)
-			plant(env, kind, groundAt(env, pos + off), { Scale = scale, Color = color, Delay = (k - 1) * 0.07, Life = 3.2, SwayAmp = 0.05 })
+			plant(env, kind, groundAt(env, pos + off), { Scale = scale, Color = color, Delay = (k - 1) * 0.07, Life = life, SwayAmp = 0.05 })
 		end
 		petalPuff(env, groundAt(env, pos) + Vector3.new(0, 0.6, 0), 3, { 2, 4 })
 	end,
@@ -724,7 +742,8 @@ end
 -- ---------------------------------------------------------------------------
 -- Classic voxel volcano: a grid of studded block columns stepping up to a crater (matches the map's blocky style)
 -- ---------------------------------------------------------------------------
-local CELL = 2.5 -- column width (studs)
+local CELL_SIZE = 2.5 -- column width (studs); Low tier uses CELL_SIZE_LOW (about half the columns)
+local CELL_SIZE_LOW = 3.5
 local VOXEL_R = 15.5 -- mountain radius
 local CRATER_R = 4.5 -- columns closer than this form the crater floor
 local CRATER_FLOOR = 21 -- top of the crater floor columns (the lava lake sits on it)
@@ -751,6 +770,7 @@ end
 -- Builds the stepped mountain, the crater lava lake, lava running down the steps into map-style lava pools,
 -- magma veins and MagmaRock clusters round the foot. Returns the crater lava slab (pulses with the heat).
 local function buildVoxelVolcano(env: Env, st: VolcanoState, base: Vector3): Part?
+	local CELL = if detail() == 0 then CELL_SIZE_LOW else CELL_SIZE
 	local frame = CFrame.lookAt(base, base - env.Away) -- grid axes: local -Z faces the camera
 	local rot = frame.Rotation
 	local function world(x: number, y: number, z: number): Vector3
@@ -1200,14 +1220,15 @@ local Volcano: SetPiece = {
 			local x = -24 + i * 6
 			table.insert(near, at(6 + 1.2 * math.sin(x * 0.22 + 0.7), x))
 		end
-		local rivers: { River } = {
-			lavaRiver(env, near, 2.6, 5),
-			lavaRiver(env, { at(12.75, -3), at(11.5, -8), at(10.8, -14), at(11.5, -20), at(12.5, -27) }, 2, 3),
-			lavaRiver(env, { at(12.75, -3), at(11.2, 2), at(10.5, 8), at(11.2, 14), at(12.2, 21), at(12.8, 28) }, 2, 3),
-		}
+		local low = detail() == 0
+		local rivers: { River } = { lavaRiver(env, near, 2.6, if low then 0 else 5) }
+		if not low then -- Low tier: only the near river, no crust plates, no bubbles
+			table.insert(rivers, lavaRiver(env, { at(12.75, -3), at(11.5, -8), at(10.8, -14), at(11.5, -20), at(12.5, -27) }, 2, 3))
+			table.insert(rivers, lavaRiver(env, { at(12.75, -3), at(11.2, 2), at(10.5, 8), at(11.2, 14), at(12.2, 21), at(12.8, 28) }, 2, 3))
+		end
 
 		-- per frame: crater heat (charges before eruptions), flowing glow waves, drifting crust, bubbles
-		local nextBubble = 0.3
+		local nextBubble = if low then math.huge else 0.3
 		local bubbleEvery = if env.Full then 0.45 else 0.9
 		env.AddUpdater(function(t, dt)
 			if t < st.ChargeUntil then

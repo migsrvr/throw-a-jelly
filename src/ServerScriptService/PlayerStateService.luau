@@ -157,6 +157,8 @@ function PlayerStateService.Sync(player: Player)
 		PlacedSlimesBySlot = placedBySlotStr,
 		DiscoveredSlimes = profile.DiscoveredSlimes,
 		EquippedTrailZone = profile.EquippedTrailZone,
+		GraphicsMode = profile.GraphicsMode,
+		MusicOn = profile.MusicOn,
 		ClaimedFreeGift = profile.ClaimedFreeGift,
 		OwnedBoosts = profile.OwnedBoosts,
 		TotalThrows = profile.TotalThrows,
@@ -449,6 +451,29 @@ function PlayerStateService.Init()
 			if ok then
 				PlayerStateService.Sync(player)
 			end
+		end
+	end)
+
+	Remotes.GetEvent("RequestSetGraphics").OnServerEvent:Connect(function(player: Player, payload: any)
+		local profile = profiles[player]
+		if not profile or type(payload) ~= "table" then
+			return
+		end
+		local mode = payload.Mode
+		if type(mode) == "string" and (mode == "Auto" or mode == "Low" or mode == "High") and profile.GraphicsMode ~= mode then
+			profile.GraphicsMode = mode
+			PlayerStateService.Sync(player)
+		end
+	end)
+
+	Remotes.GetEvent("RequestSetMusic").OnServerEvent:Connect(function(player: Player, payload: any)
+		local profile = profiles[player]
+		if not profile or type(payload) ~= "table" or type(payload.On) ~= "boolean" then
+			return
+		end
+		if profile.MusicOn ~= payload.On then
+			profile.MusicOn = payload.On
+			PlayerStateService.Sync(player)
 		end
 	end)
 

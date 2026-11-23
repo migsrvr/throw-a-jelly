@@ -102,8 +102,17 @@ task.spawn(function()
 	local zones = map and map:WaitForChild("Zones", 15)
 	if zones then
 		refreshAllGates(latestPower)
-		zones.ChildAdded:Connect(function()
-			refreshAllGates(latestPower)
+		-- with streaming, gate parts arrive bit by bit: refresh (debounced) whenever anything streams in
+		local pending = false
+		zones.DescendantAdded:Connect(function()
+			if pending then
+				return
+			end
+			pending = true
+			task.delay(0.2, function()
+				pending = false
+				refreshAllGates(latestPower)
+			end)
 		end)
 	end
 end)

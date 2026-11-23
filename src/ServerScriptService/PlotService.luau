@@ -11,6 +11,7 @@
 	- Hub.Leaderboards (RARESTSLIME, BESTS, THROWPOWER, MOSTMONEY)
 ]]
 
+local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -1043,57 +1044,70 @@ function PlotService.Init()
 		end
 	end)
 
-	local accum = 0
+	-- ROAMING (mobile-friendly): the server only DECIDES where each plot slime walks, at ROAM_TICK. Each walk
+	-- segment is published as attributes (RoamFromX/Z, RoamToX/Z, RoamT0 = server time, RoamDur, RoamYaw) and every
+	-- client animates the slimes near its camera (PlotSlimeAnimator.client.luau): hop, idle bob and turning are
+	-- local, so nothing about the motion replicates 60 times a second. The server writes the root once per
+	-- segment (at its end) and moves the Pick Up prompt anchor along the path at ROAM_TICK.
+	local ROAM_TICK = 0.2
 	local autoTrainAccum = 0
+	local roamAccum = 0
 	local roamRng = Random.new()
-	local roamState: { [Model]: any } = setmetatable({}, { __mode = "k" }) :: any
-	RunService.Heartbeat:Connect(function(dt: number)
-		stepTraining()
-		autoTrainAccum += dt
-		if autoTrainAccum >= 0.2 then
-			autoTrainAccum = 0
-			checkAutoStartTraining()
-		end
-		accum += dt
+	type Roam = { X: number, Z: number, TX: number, TZ: number, Yaw: number, Wait: number, Moving: boolean, T0: number, Dur: number }
+	local roamState: { [Model]: Roam } = setmetatable({}, { __mode = "k" }) :: any
+
+	local function publishRoam(model: Model, st: Roam)
+		model:SetAttribute("RoamFromX", st.X)
+		model:SetAttribute("RoamFromZ", st.Z)
+		model:SetAttribute("RoamToX", st.TX)
+		model:SetAttribute("RoamToZ", st.TZ)
+		model:SetAttribute("RoamYaw", st.Yaw)
+		model:SetAttribute("RoamDur", st.Dur)
+		model:SetAttribute("RoamT0", st.T0)
+	end
+
+	local function stepRoaming(tickDt: number)
+		local now = workspace:GetServerTimeNow()
 		for _, slotsMap in plotSlotModels do
 			for _, slimeModel in slotsMap do
 				local primary = slimeModel.PrimaryPart
-				if primary then
+				if primary and slimeModel.Parent then
 					local baseY = (slimeModel:GetAttribute("SlotBaseY") :: number?) or primary.Position.Y
-					local phase = (slimeModel:GetAttribute("SlotPhase") :: number?) or 0
 					local st = roamState[slimeModel]
 					if not st then
 						st = {
 							X = primary.Position.X,
 							Z = primary.Position.Z,
-							Yaw = math.pi,
-							Wait = roamRng:NextNumber(0.2, 3.5),
 							TX = primary.Position.X,
 							TZ = primary.Position.Z,
+							Yaw = math.pi,
+							Wait = roamRng:NextNumber(0.2, 3.5),
 							Moving = false,
+							T0 = now,
+							Dur = 0,
 						}
 						roamState[slimeModel] = st
+						publishRoam(slimeModel, st) -- resting where it was placed
+						CollectionService:AddTag(slimeModel, "PlotSlime")
 					end
-					local moving = false
+					local padPart = slimeSlotPart[slimeModel]
+					local promptAnchor = if padPart then padPart:FindFirstChild("PromptAnchor") :: Attachment? else nil
 					if st.Moving then
-						local dx, dz = st.TX - st.X, st.TZ - st.Z
-						local dist = math.sqrt(dx * dx + dz * dz)
-						local step = ROAM_SPEED * dt
-						if dist <= step then
+						local u = if st.Dur > 0 then (now - st.T0) / st.Dur else 1
+						if u >= 1 then
 							st.X, st.Z = st.TX, st.TZ
 							st.Moving = false
 							st.Wait = roamRng:NextNumber(1.5, 5.0)
-						else
-							st.X += dx / dist * step
-							st.Z += dz / dist * step
-							-- turn smoothly toward the direction of travel (the slime's front is -Z)
-							local goalYaw = math.atan2(-dx, -dz)
-							local diff = (goalYaw - st.Yaw + math.pi) % (2 * math.pi) - math.pi
-							st.Yaw += diff * math.min(1, dt * 8)
-							moving = true
+							-- one root write per segment: rest at the destination, facing the way it walked
+							SlimeFactory.PositionSlime(slimeModel, CFrame.new(st.X, baseY, st.Z) * CFrame.Angles(0, st.Yaw, 0), 0)
+							if promptAnchor then
+								promptAnchor.WorldPosition = Vector3.new(st.X, baseY + 1, st.Z)
+							end
+						elseif promptAnchor then
+							promptAnchor.WorldPosition = Vector3.new(st.X + (st.TX - st.X) * u, baseY + 1, st.Z + (st.TZ - st.Z) * u)
 						end
 					else
-						st.Wait -= dt
+						st.Wait -= tickDt
 						if st.Wait <= 0 then
 							local minX = (slimeModel:GetAttribute("RoamMinX") :: number?) or st.X
 							local maxX = (slimeModel:GetAttribute("RoamMaxX") :: number?) or st.X
@@ -1101,21 +1115,36 @@ function PlotService.Init()
 							local maxZ = (slimeModel:GetAttribute("RoamMaxZ") :: number?) or st.Z
 							st.TX = roamRng:NextNumber(minX, maxX)
 							st.TZ = roamRng:NextNumber(minZ, maxZ)
-							st.Moving = true
+							local dx, dz = st.TX - st.X, st.TZ - st.Z
+							local dist = math.sqrt(dx * dx + dz * dz)
+							if dist > 0.05 then
+								st.Yaw = math.atan2(-dx, -dz) -- the slime's front is -Z
+								st.Dur = dist / ROAM_SPEED
+								st.T0 = now
+								st.Moving = true
+								publishRoam(slimeModel, st)
+							else
+								st.Wait = roamRng:NextNumber(1.5, 5.0)
+							end
 						end
-					end
-					-- hop while travelling, gentle idle bob otherwise
-					local wave = math.sin(accum * (if moving then 9 else 3.4) + phase)
-					local lift = if moving then math.abs(wave) * 0.6 else math.max(0, wave) * 0.12
-					local pos = Vector3.new(st.X, baseY + lift, st.Z)
-					SlimeFactory.PositionSlime(slimeModel, CFrame.new(pos) * CFrame.Angles(0, st.Yaw, 0), -wave * 0.14)
-					local padPart = slimeSlotPart[slimeModel]
-					local promptAnchor = if padPart then padPart:FindFirstChild("PromptAnchor") :: Attachment? else nil
-					if promptAnchor then
-						promptAnchor.WorldPosition = Vector3.new(st.X, baseY + 1, st.Z)
 					end
 				end
 			end
+		end
+	end
+
+	RunService.Heartbeat:Connect(function(dt: number)
+		stepTraining()
+		autoTrainAccum += dt
+		if autoTrainAccum >= 0.2 then
+			autoTrainAccum = 0
+			checkAutoStartTraining()
+		end
+		roamAccum += dt
+		if roamAccum >= ROAM_TICK then
+			local tickDt = roamAccum
+			roamAccum = 0
+			stepRoaming(tickDt)
 		end
 	end)
 end

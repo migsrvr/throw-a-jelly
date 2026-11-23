@@ -40,6 +40,7 @@ local RobuxStoreWindow = require(HudWindows:WaitForChild("RobuxStoreWindow"))
 local WelcomeBackWindow = require(HudWindows:WaitForChild("WelcomeBackWindow"))
 local UnlockPopups = require(HudWindows:WaitForChild("UnlockPopups"))
 local GiftPicker = require(HudWindows:WaitForChild("GiftPicker"))
+local SettingsWindow = require(HudWindows:WaitForChild("SettingsWindow"))
 
 local stateSync = Remotes.GetEvent("PlayerStateSync")
 local toastNotify = Remotes.GetEvent("ToastNotify")
@@ -370,8 +371,9 @@ local rightNav = Instance.new("Frame")
 rightNav.Name = "RightNav"
 rightNav.AnchorPoint = Vector2.new(1, 0.5)
 -- Phone: moved up to clear the Roblox jump button
-rightNav.Position = UDim2.new(1, -16, if isPhone then 0.40 else 0.5, 0)
-rightNav.Size = UDim2.fromOffset(88, 2 * 88 + 18)
+-- (the Settings button sits on top: grow the column upward by its height so the other buttons don't move down)
+rightNav.Position = UDim2.new(1, -16, if isPhone then 0.40 else 0.5, -(52 + 18) / 2)
+rightNav.Size = UDim2.fromOffset(88, 52 + 2 * 88 + 2 * 18)
 rightNav.BackgroundTransparency = 1
 rightNav.Parent = screenGui
 makeList(rightNav, Enum.FillDirection.Vertical, 18)
@@ -830,12 +832,23 @@ local robuxWin = RobuxStoreWindow.Build(screenGui, {
 	OnGift = if #giftItems > 0 then giftPicker.Open else nil,
 })
 
+local settingsWin = SettingsWindow.Build(screenGui, {
+	ModalScrim = modalScrim,
+	OnPickGraphics = function(mode: string)
+		Remotes.GetEvent("RequestSetGraphics"):FireServer({ Mode = mode })
+	end,
+	OnPickMusic = function(on: boolean)
+		Remotes.GetEvent("RequestSetMusic"):FireServer({ On = on })
+	end,
+})
+
 local allModals: { Frame } = {
 	indexWin.Frame,
 	robuxWin.Frame,
 	upgradesWin.Frame,
 	rewardsWin.Frame,
 	slimesWin.Frame,
+	settingsWin.Frame,
 }
 
 local welcomeBack: WelcomeBackWindow.WelcomeBackHandle
@@ -947,6 +960,21 @@ badgeText.Parent = rewardsBadge
 createNavButton(rightNav, "SlimesNavBtn", "slimes", "Slimes", "slimesnav", 2, function()
 	toggleExclusiveModal(slimesWin.Frame)
 end, true)
+
+-- Settings (Graphics: Auto / Low / High): a shorter grey button at the top of the right column
+UiKit.CreateGradientButton({
+	Name = "SettingsNavBtn",
+	Parent = rightNav,
+	Size = UDim2.fromOffset(88, 52),
+	Kind = "grey",
+	CornerRadius = 18,
+	Text = "Settings",
+	TextSize = 18,
+	LayoutOrder = 0,
+	OnClick = function()
+		toggleExclusiveModal(settingsWin.Frame)
+	end,
+})
 
 
 -- ============================================================================
@@ -1186,37 +1214,64 @@ local function resolveObjectiveWorldTarget(targetType: string): Vector3?
 	return nil
 end
 
-RunService.RenderStepped:Connect(function()
+-- MOBILE: the objective (text, target, arrow visibility) is recomputed at OBJECTIVE_HZ and only written when it
+-- changes; the 3D arrow and chevrons still animate every frame, but only while there is a target to point at.
+local OBJECTIVE_HZ = 10
+local objectiveAcc = math.huge
+local cachedTarget: Vector3? = nil
+local arrowHidden = false
+
+local function hideArrow()
+	if arrowHidden then
+		return
+	end
+	arrowHidden = true
+	arrowPart.Transparency = 1
+	for _, chev in chevrons do
+		chev.Transparency = 1
+	end
+end
+
+local function setIfChanged(inst: Instance, prop: string, value: any)
+	if (inst :: any)[prop] ~= value then
+		(inst :: any)[prop] = value
+	end
+end
+
+RunService.RenderStepped:Connect(function(dt: number)
 	local inCutscene = (localPlayer:GetAttribute("InRevealCutscene") :: boolean?) == true
 	local inTraining = (localPlayer:GetAttribute("InTraining") :: boolean?) == true
-	screenGui.Enabled = not inCutscene and not inTraining
+	setIfChanged(screenGui, "Enabled", not inCutscene and not inTraining)
 	if inCutscene or inTraining then
-		arrowPart.Transparency = 1
-		for _, chev in chevrons do
-			chev.Transparency = 1
-		end
+		hideArrow()
+		objectiveAcc = math.huge -- refresh right away when we come back
 		return
 	end
 
 	-- Spec 4: Objective, Top Teleport Bar, and Hotbar hide while the bait is in flight (ThrowController sets the attribute)
 	local inThrow = (localPlayer:GetAttribute("InThrow") :: boolean?) == true
-	topTeleportBar.Visible = not inThrow
-	objectiveGroup.Visible = not inThrow
-	hotbarGroup.Visible = not inThrow
+	setIfChanged(topTeleportBar, "Visible", not inThrow)
+	setIfChanged(objectiveGroup, "Visible", not inThrow)
+	setIfChanged(hotbarGroup, "Visible", not inThrow)
 
-	local obj = ProgressionLogic.GetCurrentObjective(currentState, selectedHotbarUid ~= nil)
-	objectiveLabel.Text = obj.Text
+	objectiveAcc += dt
+	if objectiveAcc >= 1 / OBJECTIVE_HZ then
+		objectiveAcc = 0
+		local obj = ProgressionLogic.GetCurrentObjective(currentState, selectedHotbarUid ~= nil)
+		setIfChanged(objectiveLabel, "Text", obj.Text)
+		setIfChanged(hotbarArrowHolder, "Visible", obj.TargetType == "Hotbar")
+		cachedTarget = resolveObjectiveWorldTarget(obj.TargetType)
+	end
 
 	local now = os.clock()
 	local bounceOffset = math.sin(now * 5.5) * 1.1
 
-	hotbarArrowHolder.Visible = obj.TargetType == "Hotbar"
-
-	local worldTarget = resolveObjectiveWorldTarget(obj.TargetType)
+	local worldTarget = cachedTarget
 	local char = localPlayer.Character
 	local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
 
 	if worldTarget and root then
+		arrowHidden = false
 		arrowPart.Transparency = 0
 		arrowPart.CFrame = CFrame.new(worldTarget + Vector3.new(0, bounceOffset, 0))
 			* CFrame.Angles(math.rad(180), now * 2.2, 0)
@@ -1237,10 +1292,7 @@ RunService.RenderStepped:Connect(function()
 			end
 		end
 	else
-		arrowPart.Transparency = 1
-		for _, chev in chevrons do
-			chev.Transparency = 1
-		end
+		hideArrow()
 	end
 end)
 
